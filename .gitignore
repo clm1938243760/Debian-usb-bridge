@@ -1,0 +1,34 @@
+# Python/cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+venv/
+env/
+
+# Local board/runtime configuration
+rk3588_gateway/config.yaml
+*.local.yaml
+*.secret*
+
+# Build/deploy artifacts
+*.tar.gz
+*.zip
+*.log
+tmp/
+
+# Generated presentation artifacts kept outside source
+rk3588_project_status.pptx
+rk3588_project_status_previews/
+build_project_ppt.js
+build_project_ppt.py
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
