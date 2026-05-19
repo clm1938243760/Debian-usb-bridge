@@ -8,9 +8,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 from threading import Event
+from typing import Optional
 
+from .compat import to_thread, unlink_missing_ok
 from .config import PrintCaptureConfig
 from .events import GatewayEvent
+from .printer import Printer
 from .queue import EventQueue
 from .report_pdf import ReportPdfConverter
 from .vm_transfer import VmTransfer
@@ -24,14 +27,16 @@ class PrintCapture:
         config: PrintCaptureConfig,
         queue: EventQueue,
         device_id: str,
-        vm_transfer: VmTransfer | None = None,
-        report_pdf: ReportPdfConverter | None = None,
+        vm_transfer: Optional[VmTransfer] = None,
+        report_pdf: Optional[ReportPdfConverter] = None,
+        printer: Optional[Printer] = None,
     ) -> None:
         self.config = config
         self.queue = queue
         self.device_id = device_id
         self.vm_transfer = vm_transfer
         self.report_pdf = report_pdf
+        self.printer = printer
         self.output_dir = Path(config.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._stop = asyncio.Event()
@@ -53,7 +58,7 @@ class PrintCapture:
                 continue
 
             try:
-                await asyncio.to_thread(self._capture_loop)
+                await to_thread(self._capture_loop)
             except Exception:
                 LOGGER.exception("print capture loop failed")
                 await asyncio.sleep(2)
@@ -65,7 +70,7 @@ class PrintCapture:
         except OSError:
             LOGGER.exception("printer capture read-write open failed, fallback to read-only")
             fd = os.open(self.config.device, os.O_RDONLY | os.O_NONBLOCK)
-        current: Path | None = None
+        current: Optional[Path] = None
         handle = None
         total = 0
         last_data = 0.0
@@ -104,7 +109,7 @@ class PrintCapture:
                         self._finish_job(current, total)
                     else:
                         LOGGER.warning("print job too small: %s bytes=%d", current, total)
-                        current.unlink(missing_ok=True)
+                        unlink_missing_ok(current)
                     current = None
                     total = 0
 
@@ -136,6 +141,7 @@ class PrintCapture:
                         payload={"source": str(path), "path": str(pdf_path), "source_type": "print"},
                     )
                 )
+                self._print_pdf(pdf_path, "print report")
         if self.vm_transfer:
             try:
                 asyncio.run(self._send_to_vm(path, total))
@@ -152,3 +158,18 @@ class PrintCapture:
                 payload={"path": str(path), "bytes": total},
             )
         )
+
+    def _print_pdf(self, path: Path, title: str) -> None:
+        if not self.printer:
+            return
+        try:
+            ok = self.printer.print_file_blocking(path, title=title)
+            self.queue.put(
+                GatewayEvent(
+                    type="report.printed" if ok else "report.print_failed",
+                    device_id=self.device_id,
+                    payload={"path": str(path), "source_type": "print"},
+                )
+            )
+        except Exception:
+            LOGGER.exception("print converted pdf failed: %s", path)

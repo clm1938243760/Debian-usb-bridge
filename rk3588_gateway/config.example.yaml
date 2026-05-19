@@ -1,132 +1,99 @@
 device:
-  id: "rk3588-lubancat5v2-001"
+  id: "rk3568-atk-evb1-001"
   location: "workbench"
 
 scanner:
   enabled: true
-  # Use /dev/input/by-id/... because event numbers can change after reboot.
   event_device: "/dev/input/by-id/usb-USBKey_Chip_USBKey_Module_202730041341-event-kbd"
   terminator_keys: ["KEY_ENTER", "KEY_KPENTER"]
   min_length: 8
 
 patient_api:
   enabled: true
-  endpoint: "http://patient-api.example.local/api/client/getTJPatientInfo"
+  endpoint: "http://192.168.112.139:9061/api/client/getTJPatientInfo"
   timeout_seconds: 10
-  user_agent: "RK3588-Gateway"
-  raw_dir: "/var/lib/rk3588-gateway/api_raw"
+  user_agent: "RK3568-Gateway"
+  raw_dir: "/var/lib/rk3568-gateway/api_raw"
 
 hid_input:
   enabled: true
-  keyboard_backend: "ch9350"
-  mouse_backend: "ch9350"
+  keyboard_backend: "usb_gadget"
+  mouse_backend: "usb_gadget"
   keyboard_device: "/dev/hidg0"
   mouse_device: "/dev/hidg1"
-  ch9350_serial_device: "/dev/ttyS1"
-  ch9350_baudrate: 115200
-  ch9350_state: 3
-  ch9350_set_state2: false
-  ch9350_caps_led_mask: 1
-  ch9350_mouse_frame: "absolute7"
-  ch9350_mouse_reset_to_origin: false
-  template_path: "/opt/rk3588_gateway/MarkInfo_SearchTitle_Config_100.json"
+  template_path: "/opt/rk3568_gateway/MarkInfo_SearchTitle_Config_100.json"
   screen_width: 1920
   screen_height: 1080
   action_delay_ms: 60
   start_delay_ms: 150
   force_caps_ascii: true
-  # powershell: use Win+R and PowerShell clipboard paste for Chinese/non-ASCII.
-  # skip: skip Chinese/non-ASCII fields so command text will never be typed into the form.
   non_ascii_mode: "powershell"
   powershell_wait_ms: 1800
 
 printer:
-  enabled: false
+  enabled: true
   command: "lp"
-  printer_name: ""
-  timeout_seconds: 15
+  printer_name: "HP_DeskJet_4900"
+  timeout_seconds: 60
 
 print_capture:
   enabled: true
   device: "/dev/g_printer0"
-  output_dir: "/var/lib/rk3588-gateway/print_jobs"
+  output_dir: "/var/lib/rk3568-gateway/print_jobs"
   chunk_size: 65536
   idle_complete_seconds: 2
   min_job_bytes: 128
 
 report_pdf:
   enabled: true
-  output_dir: "/var/lib/rk3588-gateway/reports_pdf"
+  output_dir: "/var/lib/rk3568-gateway/reports_pdf"
   keep_original: true
 
 msc:
   enabled: true
-  image_path: "/var/lib/rk3588-gateway/msc/ums_shared.img"
-  mount_dir: "/mnt/rk3588-gateway-msc"
-  output_dir: "/var/lib/rk3588-gateway/msc_files"
-  state_dir: "/var/lib/rk3588-gateway/msc_state"
+  image_path: "/var/lib/rk3568-gateway/msc/ums_shared.img"
+  mount_dir: "/mnt/rk3568-gateway-msc"
+  output_dir: "/var/lib/rk3568-gateway/msc_files"
+  state_dir: "/var/lib/rk3568-gateway/msc_state"
   gadget_dir: "/sys/kernel/config/usb_gadget/rockchip"
-  # Leave empty to auto-detect, or set e.g. "fcc00000.dwc3".
-  udc_device: ""
+  udc_device: "fcc00000.dwc3"
   poll_interval_seconds: 5
   stable_seconds: 3
-  # After mtime is stable, keep waiting this many seconds. If Windows writes
-  # another file during this window, the timer restarts.
   quiet_seconds: 2
-  # First boot only records the current image mtime, so old files are not copied.
   init_baseline: true
-  # Rebuilds printer+MSC gadget after local read, so Windows sees the U disk return.
-  rebuild_command: "/opt/rk3588_gateway/scripts/setup_usb_printer_gadget.sh"
+  rebuild_command: "/opt/rk3568_gateway/scripts/setup_usb_composite_gadget.sh"
   copy_recursive: true
   ignore_names: ["System Volume Information", "$RECYCLE.BIN"]
 
 gpio:
   enabled: true
-  consumer: "rk3588-gateway"
+  consumer: "rk3568-gateway"
   lines:
-    - name: "up"
-      enabled: true
-      backend: "sysfs"
-      chip: "/dev/gpiochip0"
-      line: 83
-      number: 83
-      direction: "in"
-      active_low: true
-      default: 0
     - name: "down"
       enabled: true
       backend: "sysfs"
-      chip: "/dev/gpiochip0"
-      line: 62
-      number: 62
+      chip: "/dev/gpiochip4"
+      line: 10
+      number: 138
       direction: "in"
       active_low: true
       default: 0
     - name: "ok"
       enabled: true
       backend: "sysfs"
-      chip: "/dev/gpiochip0"
-      line: 63
-      number: 63
-      direction: "in"
-      active_low: true
-      default: 0
-    - name: "back"
-      enabled: true
-      backend: "sysfs"
-      chip: "/dev/gpiochip0"
-      line: 478
-      number: 478
+      chip: "/dev/gpiochip4"
+      line: 11
+      number: 139
       direction: "in"
       active_low: true
       default: 0
 
 vm_transfer:
-  enabled: true
+  enabled: false
   method: "scp"
-  host: "vm-host.example.local"
-  user: "replace-me"
-  password: "replace-me"
+  host: ""
+  user: ""
+  password: ""
   remote_dir: "~/Documents"
   port: 22
   connect_timeout_seconds: 10
@@ -134,8 +101,8 @@ vm_transfer:
 
 uploader:
   enabled: false
-  endpoint: "https://example.com/api/gateway/events"
-  api_key: "replace-me"
+  endpoint: ""
+  api_key: ""
   timeout_seconds: 10
   retry_interval_seconds: 5
   max_batch_size: 20
@@ -146,7 +113,7 @@ local_api:
   port: 8080
 
 storage:
-  sqlite_path: "/var/lib/rk3588-gateway/events.db"
+  sqlite_path: "/var/lib/rk3568-gateway/events.db"
 
 logging:
   level: "INFO"

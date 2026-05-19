@@ -20,7 +20,7 @@ fi
 
 if [[ -z "$UDC" ]]; then
   echo "No UDC found under /sys/class/udc"
-  echo "Check that the RK3588 OTG USB port is in device/peripheral mode."
+  echo "Check that the Rockchip OTG USB port is in device/peripheral mode."
   exit 1
 fi
 

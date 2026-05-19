@@ -5,8 +5,9 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
+from .compat import to_thread
 from .config import HidInputConfig
 
 LOGGER = logging.getLogger(__name__)
@@ -64,9 +65,9 @@ for i, ch in enumerate("abcdefghijklmnopqrstuvwxyz"):
 class HidOutput:
     def __init__(self, config: HidInputConfig) -> None:
         self.config = config
-        self._led_state: int | None = None
-        self._led_task: asyncio.Task[None] | None = None
-        self._ch9350_fd: int | None = None
+        self._led_state: Optional[int] = None
+        self._led_task = None
+        self._ch9350_fd: Optional[int] = None
         self._ch9350_rx = bytearray()
 
     async def execute_form(self, task: dict[str, Any]) -> None:
@@ -151,7 +152,7 @@ class HidOutput:
             LOGGER.warning("ch9350 absolute target requested without origin reset; using relative dx/dy directly")
         await self.ch9350_move_relative(target_x, target_y)
 
-    async def ch9350_move_relative(self, dx: int, dy: int, repeat: int | None = None) -> None:
+    async def ch9350_move_relative(self, dx: int, dy: int, repeat: Optional[int] = None) -> None:
         if repeat is not None:
             for _ in range(repeat):
                 await self._write_ch9350_mouse(button=0, dx=dx, dy=dy, wheel=0)
@@ -237,7 +238,7 @@ class HidOutput:
     def _start_led_reader(self) -> None:
         if self._led_task and not self._led_task.done():
             return
-        self._led_task = asyncio.create_task(self._led_reader_loop(), name="hid-led-reader")
+        self._led_task = asyncio.create_task(self._led_reader_loop())
 
     async def _led_reader_loop(self) -> None:
         if self.config.keyboard_backend == "ch9350":
@@ -315,14 +316,14 @@ class HidOutput:
                 continue
             break
 
-    def _get_caps(self) -> bool | None:
+    def _get_caps(self) -> Optional[bool]:
         if self._led_state is None:
             return None
         if self.config.keyboard_backend == "ch9350":
             return bool(self._led_state & self.config.ch9350_caps_led_mask)
         return bool(self._led_state & 2)
 
-    async def _wait_caps(self, timeout: float = 0.5) -> bool | None:
+    async def _wait_caps(self, timeout: float = 0.5) -> Optional[bool]:
         end = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < end:
             state = self._get_caps()
@@ -346,11 +347,11 @@ class HidOutput:
         if self.config.keyboard_backend == "ch9350":
             await self._write_ch9350_keyboard(report)
             return
-        await asyncio.to_thread(self._write_file, self.config.keyboard_device, report)
+        await to_thread(self._write_file, self.config.keyboard_device, report)
 
     async def _write_mouse(self, button: int, ax: int, ay: int) -> None:
         report = bytes([button, ax & 0xFF, (ax >> 8) & 0xFF, ay & 0xFF, (ay >> 8) & 0xFF])
-        await asyncio.to_thread(self._write_file, self.config.mouse_device, report)
+        await to_thread(self._write_file, self.config.mouse_device, report)
 
     def _write_file(self, path: str, data: bytes) -> None:
         with open(path, "wb", buffering=0) as handle:
@@ -360,7 +361,7 @@ class HidOutput:
         if self._ch9350_fd is not None:
             return
         await self._wait_device(self.config.ch9350_serial_device)
-        await asyncio.to_thread(self._configure_ch9350_serial)
+        await to_thread(self._configure_ch9350_serial)
         fd = os.open(self.config.ch9350_serial_device, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         self._ch9350_fd = fd
         LOGGER.info("ch9350 serial opened: %s baud=%d", self.config.ch9350_serial_device, self.config.ch9350_baudrate)
@@ -390,7 +391,7 @@ class HidOutput:
         await self._ensure_ch9350()
         assert self._ch9350_fd is not None
         frame = CH9350_KEYBOARD_PREFIX + report
-        await asyncio.to_thread(os.write, self._ch9350_fd, frame)
+        await to_thread(os.write, self._ch9350_fd, frame)
 
     async def _write_ch9350_mouse(self, button: int, dx: int, dy: int, wheel: int = 0) -> None:
         await self._ensure_ch9350()
@@ -399,7 +400,7 @@ class HidOutput:
             LOGGER.warning("unsupported ch9350 mouse frame mode=%s, using relative4", self.config.ch9350_mouse_frame)
         report = bytes([button & 0x07, dx & 0xFF, dy & 0xFF, wheel & 0xFF])
         frame = CH9350_MOUSE_PREFIX + report
-        await asyncio.to_thread(os.write, self._ch9350_fd, frame)
+        await to_thread(os.write, self._ch9350_fd, frame)
 
     async def _write_ch9350_abs_mouse(self, button: int, x: int, y: int, wheel: int = 0) -> None:
         await self._ensure_ch9350()
@@ -417,7 +418,7 @@ class HidOutput:
         ])
         frame = CH9350_ABS_MOUSE_PREFIX + report
         LOGGER.info("ch9350 abs mouse report x=%d y=%d ax=%d ay=%d button=%d", x, y, ax, ay, button)
-        await asyncio.to_thread(os.write, self._ch9350_fd, frame)
+        await to_thread(os.write, self._ch9350_fd, frame)
 
     async def _wait_device(self, path: str) -> None:
         for _ in range(60):

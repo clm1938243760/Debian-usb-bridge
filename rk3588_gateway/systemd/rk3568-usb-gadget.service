@@ -1,0 +1,12 @@
+[Unit]
+Description=RK3568 USB Composite Gadget
+After=systemd-modules-load.service
+Before=rk3568-gateway.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/rk3568_gateway/scripts/setup_usb_composite_gadget.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 DEVICE = os.environ.get("PRINTER_DEVICE", "/dev/g_printer0")
-OUT_DIR = Path(os.environ.get("PRINT_OUT_DIR", "/var/lib/rk3588-gateway/print_jobs"))
+OUT_DIR = Path(os.environ.get("PRINT_OUT_DIR", "/var/lib/rk3568-gateway/print_jobs"))
 IDLE_SECONDS = float(os.environ.get("PRINT_IDLE_SECONDS", "2"))
 CHUNK = 65536
 

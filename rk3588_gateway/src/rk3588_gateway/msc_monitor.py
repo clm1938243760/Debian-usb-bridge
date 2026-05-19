@@ -9,9 +9,12 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, Union
 
+from .compat import to_thread
 from .config import MscConfig
 from .events import GatewayEvent
+from .printer import Printer
 from .queue import EventQueue
 from .report_pdf import ReportPdfConverter
 
@@ -24,12 +27,14 @@ class MscMonitor:
         config: MscConfig,
         queue: EventQueue,
         device_id: str,
-        report_pdf: ReportPdfConverter | None = None,
+        report_pdf: Optional[ReportPdfConverter] = None,
+        printer: Optional[Printer] = None,
     ) -> None:
         self.config = config
         self.queue = queue
         self.device_id = device_id
         self.report_pdf = report_pdf
+        self.printer = printer
         self.image_path = Path(config.image_path)
         self.mount_dir = Path(config.mount_dir)
         self.output_dir = Path(config.output_dir)
@@ -74,7 +79,7 @@ class MscMonitor:
                     await asyncio.sleep(self.config.poll_interval_seconds)
                     continue
                 try:
-                    copied = await asyncio.to_thread(self._copy_new_files)
+                    copied = await to_thread(self._copy_new_files)
                     self._write_last_mtime(self._image_mtime() or stable_mtime)
                     if copied:
                         LOGGER.info("msc copied %d new file(s)", len(copied))
@@ -121,6 +126,7 @@ class MscMonitor:
     def _copy_new_files(self) -> list[Path]:
         udc = self._unbind_gadget()
         copied: list[Path] = []
+        pdfs_to_print = []
         try:
             self._detach_mass_storage_file()
             self._mount_image_ro()
@@ -164,15 +170,18 @@ class MscMonitor:
                                 payload={"source": str(target), "path": str(pdf_path), "source_type": "msc"},
                             )
                         )
+                        pdfs_to_print.append(pdf_path)
             if skipped:
                 LOGGER.info("msc skipped %d already copied file(s)", skipped)
             subprocess.run(["sync"], check=False)
-            return copied
         finally:
             self._umount_image()
             if not self._rebuild_gadget():
                 self._attach_mass_storage_file()
                 self._bind_gadget(udc)
+        for pdf_path in pdfs_to_print:
+            self._print_pdf(pdf_path, "msc report")
+        return copied
 
     def _iter_files(self) -> list[Path]:
         iterator = self.mount_dir.rglob("*") if self.config.copy_recursive else self.mount_dir.glob("*")
@@ -200,7 +209,7 @@ class MscMonitor:
         LOGGER.info("msc file copied: %s -> %s", source, target)
         return target
 
-    def _file_info(self, path: Path) -> dict[str, str | int]:
+    def _file_info(self, path: Path) -> dict[str, Union[str, int]]:
         rel = path.relative_to(self.mount_dir).as_posix()
         stat = path.stat()
         digest = hashlib.sha256()
@@ -234,7 +243,7 @@ class MscMonitor:
                 records.add(signature)
         return records
 
-    def _append_record(self, info: dict[str, str | int], target: Path) -> None:
+    def _append_record(self, info: dict[str, Union[str, int]], target: Path) -> None:
         signature = str(info["signature"])
         with self.seen_db.open("a", encoding="utf-8") as handle:
             handle.write(signature + "\n")
@@ -336,3 +345,18 @@ class MscMonitor:
         if result.stdout.strip():
             LOGGER.info("msc rebuild output: %s", result.stdout.strip()[-500:])
         return True
+
+    def _print_pdf(self, path: Path, title: str) -> None:
+        if not self.printer:
+            return
+        try:
+            ok = self.printer.print_file_blocking(path, title=title)
+            self.queue.put(
+                GatewayEvent(
+                    type="report.printed" if ok else "report.print_failed",
+                    device_id=self.device_id,
+                    payload={"path": str(path), "source_type": "msc"},
+                )
+            )
+        except Exception:
+            LOGGER.exception("print converted pdf failed: %s", path)

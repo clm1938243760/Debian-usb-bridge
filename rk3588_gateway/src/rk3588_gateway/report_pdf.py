@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, Union
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -19,7 +21,7 @@ class ReportPdfConverter:
         self.output_dir = Path(config.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def convert(self, source: str | Path, source_type: str) -> Path | None:
+    def convert(self, source: Union[str, Path], source_type: str) -> Optional[Path]:
         if not self.config.enabled:
             return None
         path = Path(source)
@@ -34,6 +36,8 @@ class ReportPdfConverter:
             elif self._is_postscript(path) and self._ps_to_pdf(path, target):
                 pass
             elif self._image_to_pdf(path, target):
+                pass
+            elif self._office_to_pdf(path, target):
                 pass
             elif self._text_to_pdf(path, target):
                 pass
@@ -56,20 +60,48 @@ class ReportPdfConverter:
         return target
 
     def _is_pdf(self, path: Path) -> bool:
-        return path.read_bytes()[:5] == b"%PDF-"
+        with path.open("rb") as handle:
+            return handle.read(5) == b"%PDF-"
 
     def _is_postscript(self, path: Path) -> bool:
-        return path.read_bytes()[:2] == b"%!"
+        with path.open("rb") as handle:
+            head = handle.read(8192)
+        return head.startswith(b"%!") or b"%!PS" in head
 
     def _ps_to_pdf(self, source: Path, target: Path) -> bool:
         ps2pdf = shutil.which("ps2pdf")
         if not ps2pdf:
             return False
-        result = subprocess.run([ps2pdf, str(source), str(target)], capture_output=True, text=True)
-        if result.returncode != 0:
-            LOGGER.warning("ps2pdf failed: %s", result.stderr.strip())
-            return False
-        return target.exists()
+        with source.open("rb") as handle:
+            head = handle.read(8192)
+        marker = head.find(b"%!PS")
+        convert_source = source
+        temp_name = None
+        try:
+            if marker > 0:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".ps") as temp:
+                    temp_name = Path(temp.name)
+                    temp.write(head[marker:])
+                    with source.open("rb") as handle:
+                        handle.seek(len(head))
+                        shutil.copyfileobj(handle, temp)
+                convert_source = temp_name
+            result = subprocess.run(
+                [ps2pdf, str(convert_source), str(target)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+            if result.returncode != 0:
+                LOGGER.warning("ps2pdf failed: %s", result.stderr.strip())
+                return False
+            return target.exists()
+        finally:
+            if temp_name:
+                try:
+                    temp_name.unlink()
+                except FileNotFoundError:
+                    pass
 
     def _image_to_pdf(self, source: Path, target: Path) -> bool:
         try:
@@ -84,6 +116,51 @@ class ReportPdfConverter:
             return True
         except Exception:
             return False
+
+    def _office_to_pdf(self, source: Path, target: Path) -> bool:
+        if source.suffix.lower() not in {
+            ".doc",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".ppt",
+            ".pptx",
+            ".odt",
+            ".ods",
+            ".odp",
+            ".rtf",
+        }:
+            return False
+        soffice = shutil.which("libreoffice") or shutil.which("soffice")
+        if not soffice:
+            LOGGER.warning("libreoffice not found, cannot convert office file: %s", source)
+            return False
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = subprocess.run(
+                [
+                    soffice,
+                    "--headless",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    temp_dir,
+                    str(source),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                LOGGER.warning("libreoffice conversion failed: %s", result.stderr.decode(errors="replace").strip())
+                return False
+            produced = Path(temp_dir) / (source.stem + ".pdf")
+            if not produced.exists():
+                matches = list(Path(temp_dir).glob("*.pdf"))
+                produced = matches[0] if matches else produced
+            if not produced.exists():
+                return False
+            shutil.copy2(produced, target)
+            return True
 
     def _text_to_pdf(self, source: Path, target: Path) -> bool:
         try:
@@ -101,13 +178,13 @@ class ReportPdfConverter:
     def _placeholder_pdf(self, source: Path, target: Path, source_type: str) -> None:
         stat = source.stat()
         lines = [
-            "无法直接转换为可视报告",
+            "Unable to convert this source into a visual PDF.",
             "",
-            f"来源: {source_type}",
-            f"文件: {source.name}",
-            f"大小: {stat.st_size} bytes",
+            f"Source: {source_type}",
+            f"File: {source.name}",
+            f"Size: {stat.st_size} bytes",
             "",
-            "原始文件已保留，可后续用专用驱动或解析器处理。",
+            "The original file was kept for later processing with a dedicated parser or driver.",
         ]
         pages = self._text_pages("\n".join(lines))
         pages[0].save(target, "PDF", save_all=True, append_images=pages[1:])
@@ -122,7 +199,7 @@ class ReportPdfConverter:
                 raw = raw[32:]
             lines.append(raw)
 
-        pages: list[Image.Image] = []
+        pages = []
         for offset in range(0, len(lines), 26):
             image = Image.new("RGB", (1240, 1754), "white")
             draw = ImageDraw.Draw(image)
@@ -130,11 +207,11 @@ class ReportPdfConverter:
             for line in lines[offset : offset + 26]:
                 draw.text((70, y), line, font=font, fill="black")
                 y += 58
-            draw.text((70, 1680), "RK3588 Gateway", font=small, fill="#666666")
+            draw.text((70, 1680), "RK3568 Gateway", font=small, fill="#666666")
             pages.append(image)
         return pages or [Image.new("RGB", (1240, 1754), "white")]
 
-    def _font(self, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    def _font(self, size: int):
         for path in (
             "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
             "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",

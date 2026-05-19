@@ -8,7 +8,7 @@ DISPLAY_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RK3588 Gateway Status</title>
+  <title>RK3568 Gateway Status</title>
   <style>
     :root {
       color-scheme: dark;

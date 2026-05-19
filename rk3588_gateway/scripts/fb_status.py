@@ -9,13 +9,21 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
 FBIOGET_VSCREENINFO = 0x4600
 CANVAS_W = 480
 CANVAS_H = 320
+
+
+def resample_bilinear() -> int:
+    return getattr(getattr(Image, "Resampling", Image), "BILINEAR")
+
+
+def resample_lanczos() -> int:
+    return getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 
 TEXT = {
     "wait_scan": "\u5019\u8bca",
@@ -78,7 +86,7 @@ def read_state(url: str) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
-def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def load_font(size: int, bold: bool = False):
     candidates = (
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc" if bold else "",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -94,14 +102,15 @@ def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFo
 
 
 class Framebuffer:
-    def __init__(self, path: str, width: int, height: int, bpp: int) -> None:
+    def __init__(self, path: str, width: int, height: int, bpp: int, rotate: int = 0) -> None:
         self.path = path
         self.width = width
         self.height = height
         self.bpp = bpp
+        self.rotate = rotate
 
     @classmethod
-    def open(cls, path: str, width: int, height: int, bpp: int) -> "Framebuffer":
+    def open(cls, path: str, width: int, height: int, bpp: int, rotate: int = 0) -> "Framebuffer":
         try:
             import fcntl
 
@@ -113,11 +122,14 @@ class Framebuffer:
             bpp = int(values[6]) or bpp
         except Exception:
             pass
-        return cls(path, width, height, bpp)
+        return cls(path, width, height, bpp, rotate)
 
     def write(self, image: Image.Image) -> None:
         frame = Image.new("RGB", (self.width, self.height), "black")
-        canvas = image.convert("RGB").resize((CANVAS_W, CANVAS_H), Image.Resampling.BILINEAR)
+        canvas = image.convert("RGB").resize((CANVAS_W, CANVAS_H), resample_bilinear())
+        if self.rotate:
+            canvas = canvas.rotate(self.rotate, expand=True)
+        canvas = canvas.resize((self.width, self.height), resample_bilinear())
         frame.paste(canvas, (0, 0))
         payload = self._rgb565(frame) if self.bpp == 16 else frame.convert("RGBA").tobytes("raw", "BGRA")
         with Path(self.path).open("r+b", buffering=0) as handle:
@@ -176,8 +188,8 @@ class Ili9488Display:
         self,
         spidev: str,
         dc_gpio: int,
-        reset_gpio: int | None,
-        bl_gpio: int | None,
+        reset_gpio: Optional[int],
+        bl_gpio: Optional[int],
         speed_hz: int,
         rotate: int,
         color_order: str,
@@ -337,7 +349,7 @@ class AssetRenderer:
         scale = max(CANVAS_W / asset.width, CANVAS_H / asset.height)
         w = max(1, int(asset.width * scale))
         h = max(1, int(asset.height * scale))
-        fitted = asset.resize((w, h), Image.Resampling.LANCZOS)
+        fitted = asset.resize((w, h), resample_lanczos())
         left = max((w - CANVAS_W) // 2, 0)
         top = max((h - CANVAS_H) // 2, 0)
         cropped = fitted.crop((left, top, left + CANVAS_W, top + CANVAS_H))
@@ -506,6 +518,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", choices=("fb", "ili9488"), default="fb")
     parser.add_argument("--fb", default="/dev/fb0")
+    parser.add_argument("--fb-rotate", type=int, choices=(0, 90, 180, 270), default=0)
     parser.add_argument("--spidev", default="/dev/spidev1.0")
     parser.add_argument("--dc-gpio", type=int, default=139)
     parser.add_argument("--reset-gpio", type=int, default=142)
@@ -520,7 +533,7 @@ def main() -> int:
     parser.add_argument("--width", type=int, default=CANVAS_W)
     parser.add_argument("--height", type=int, default=CANVAS_H)
     parser.add_argument("--bpp", type=int, default=32)
-    parser.add_argument("--assets-dir", default="/opt/rk3588_gateway/" + TEXT["assets_dir"])
+    parser.add_argument("--assets-dir", default="/opt/rk3568_gateway/" + TEXT["assets_dir"])
     parser.add_argument("--boot-check-timeout", type=float, default=18)
     args = parser.parse_args()
 
@@ -539,7 +552,7 @@ def main() -> int:
             invert=args.invert == "on",
         )
     else:
-        display = Framebuffer.open(args.fb, args.width, args.height, args.bpp)
+        display = Framebuffer.open(args.fb, args.width, args.height, args.bpp, args.fb_rotate)
     renderer = AssetRenderer(Path(args.assets_dir))
 
     run_boot_check(display, renderer, args.url, args.boot_check_timeout)

@@ -22,7 +22,7 @@ from .workflow import GatewayWorkflow
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="RK3588 headless gateway service")
+    parser = argparse.ArgumentParser(description="RK3568 headless gateway service")
     parser.add_argument(
         "--config",
         default="config.yaml",
@@ -44,8 +44,8 @@ async def main_async() -> None:
     gpio = GpioController(config.gpio)
     report_pdf = ReportPdfConverter(config.report_pdf)
     vm_transfer = VmTransfer(config.vm_transfer)
-    print_capture = PrintCapture(config.print_capture, queue, config.device.id, vm_transfer, report_pdf)
-    msc_monitor = MscMonitor(config.msc, queue, config.device.id, report_pdf)
+    print_capture = PrintCapture(config.print_capture, queue, config.device.id, vm_transfer, report_pdf, printer)
+    msc_monitor = MscMonitor(config.msc, queue, config.device.id, report_pdf, printer)
     scanner = ScannerReader(config.scanner, config.device.id)
     uploader = Uploader(config.uploader, queue)
     local_api = LocalApi(config, queue, printer, gpio)
@@ -65,7 +65,7 @@ async def main_async() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, request_stop)
 
-    workflow_tasks: set[asyncio.Task[None]] = set()
+    workflow_tasks = set()
 
     async def run_scan_workflow(code: str) -> None:
         try:
@@ -84,12 +84,12 @@ async def main_async() -> None:
         if event.type == "barcode.scan":
             code = str(event.payload.get("code", ""))
             if code:
-                task = asyncio.create_task(run_scan_workflow(code), name=f"scan-workflow-{code}")
+                task = asyncio.create_task(run_scan_workflow(code))
                 workflow_tasks.add(task)
                 task.add_done_callback(workflow_tasks.discard)
 
     async def gpio_key_loop() -> None:
-        last_values: dict[str, int] = {}
+        last_values = {}
         while not stop_event.is_set():
             try:
                 await gpio.refresh_inputs()
@@ -107,11 +107,11 @@ async def main_async() -> None:
     await gpio.start()
     await local_api.start()
     tasks = [
-        asyncio.create_task(scanner.run(queue_event), name="scanner"),
-        asyncio.create_task(print_capture.run(), name="print-capture"),
-        asyncio.create_task(msc_monitor.run(), name="msc-monitor"),
-        asyncio.create_task(uploader.run(), name="uploader"),
-        asyncio.create_task(gpio_key_loop(), name="gpio-keys"),
+        asyncio.create_task(scanner.run(queue_event)),
+        asyncio.create_task(print_capture.run()),
+        asyncio.create_task(msc_monitor.run()),
+        asyncio.create_task(uploader.run()),
+        asyncio.create_task(gpio_key_loop()),
     ]
 
     await stop_event.wait()

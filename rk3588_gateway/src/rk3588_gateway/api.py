@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 from aiohttp import web
 
@@ -21,7 +22,7 @@ class LocalApi:
         config: AppConfig,
         queue: EventQueue,
         printer: Printer,
-        gpio: GpioController | None = None,
+        gpio: Optional[GpioController] = None,
     ) -> None:
         self.config = config
         self.queue = queue
@@ -45,7 +46,7 @@ class LocalApi:
                 web.post("/gpio/{name}/pulse", self.gpio_pulse),
             ]
         )
-        self.runner: web.AppRunner | None = None
+        self.runner: Optional[web.AppRunner] = None
 
     async def start(self) -> None:
         if not self.config.local_api.enabled:
@@ -114,7 +115,7 @@ class LocalApi:
         payload = await request.json()
         ok = await self.printer.print_text(
             text=str(payload.get("text", "")),
-            title=str(payload.get("title", "rk3588-gateway")),
+            title=str(payload.get("title", "rk3568-gateway")),
         )
         return web.json_response({"printed": ok})
 
@@ -126,7 +127,7 @@ class LocalApi:
         display = self.workflow.get_display_state() if self.workflow else {}
         for event in events:
             event_type = event.get("type")
-            if event_type in {"print.captured", "msc.file_copied", "report.pdf_created"} and self.workflow:
+            if event_type in {"print.captured", "msc.file_copied", "report.pdf_created", "report.printed"} and self.workflow:
                 payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
                 self.workflow.handle_report_received(
                     str(event_type),

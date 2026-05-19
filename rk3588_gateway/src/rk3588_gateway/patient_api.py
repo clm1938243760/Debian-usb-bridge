@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from aiohttp import ClientSession, ClientTimeout
 
@@ -15,7 +16,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def build_patient_sql(scan: str) -> str:
-    kw = scan.upper().replace("'", "''")
+    kw = scan.replace("'", "''")
     return f"""select
   t.exam_item,
   t.his_exam_no,
@@ -36,10 +37,12 @@ left join exam_item z on t.his_exam_no=z.his_exam_no
 left join patient_info q on t.patient_id=q.patient_id
 where
   (
-    upper(z.report_no) like '%{kw}%'
-    or upper(t.patient_id) like '%{kw}%'
-    or upper(t.his_exam_no) like '%{kw}%'
+    z.report_no like '%{kw}%'
+    or t.patient_id like '%{kw}%'
+    or t.patient_name like '%{kw}%'
   )
+  and z.exam_state='20'
+  and req_date>= CURRENT_DATE - INTERVAL '180 days'
 order by t.req_date desc
 limit 20"""
 
@@ -58,7 +61,7 @@ def records_from_payload(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def first_record(payload: Any) -> dict[str, Any] | None:
+def first_record(payload: Any) -> Optional[dict[str, Any]]:
     records = records_from_payload(payload)
     if records:
         return records[0]
@@ -71,7 +74,7 @@ class PatientApiClient:
         self.raw_dir = Path(config.raw_dir)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
-    async def query_first(self, scan: str) -> dict[str, Any] | None:
+    async def query_first(self, scan: str) -> Optional[dict[str, Any]]:
         records = await self.query_records(scan)
         return records[0] if records else None
 
@@ -93,13 +96,20 @@ class PatientApiClient:
         timeout = ClientTimeout(total=self.config.timeout_seconds)
         LOGGER.info("patient api request scan=%s endpoint=%s", scan, self.config.endpoint)
 
-        async with ClientSession(timeout=timeout, headers=headers) as session:
-            async with session.post(self.config.endpoint, json=request_body) as resp:
-                text = await resp.text()
-                self._save_raw(scan, resp.status, text)
-                if not 200 <= resp.status < 300:
-                    LOGGER.warning("patient api http %s: %.300s", resp.status, text)
-                    return []
+        try:
+            async with ClientSession(timeout=timeout, headers=headers) as session:
+                async with session.post(self.config.endpoint, json=request_body) as resp:
+                    text = await resp.text()
+                    self._save_raw(scan, resp.status, text)
+                    if not 200 <= resp.status < 300:
+                        LOGGER.warning("patient api http %s: %.300s", resp.status, text)
+                        return []
+        except asyncio.TimeoutError:
+            LOGGER.warning("patient api timeout scan=%s endpoint=%s", scan, self.config.endpoint)
+            return []
+        except Exception:
+            LOGGER.exception("patient api request failed scan=%s endpoint=%s", scan, self.config.endpoint)
+            return []
 
         try:
             payload = json.loads(text)

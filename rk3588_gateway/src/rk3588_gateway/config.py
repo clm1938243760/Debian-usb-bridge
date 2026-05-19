@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 import yaml
 
@@ -182,7 +182,7 @@ def _section(raw: dict[str, Any], name: str) -> dict[str, Any]:
     return value
 
 
-def load_config(path: str | Path) -> AppConfig:
+def load_config(path: Union[str, Path]) -> AppConfig:
     with Path(path).open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
     if not isinstance(raw, dict):
@@ -211,7 +211,7 @@ def load_config(path: str | Path) -> AppConfig:
 
     return AppConfig(
         device=DeviceConfig(
-            id=str(device.get("id", "rk3588-gateway")),
+            id=str(device.get("id", "rk3568-gateway")),
             location=str(device.get("location", "")),
         ),
         scanner=ScannerConfig(
@@ -224,23 +224,23 @@ def load_config(path: str | Path) -> AppConfig:
             enabled=bool(patient_api.get("enabled", True)),
             endpoint=str(patient_api.get("endpoint", "")),
             timeout_seconds=int(patient_api.get("timeout_seconds", 10)),
-            user_agent=str(patient_api.get("user_agent", "RK3588-Gateway")),
-            raw_dir=str(patient_api.get("raw_dir", "/var/lib/rk3588-gateway/api_raw")),
+            user_agent=str(patient_api.get("user_agent", "RK3568-Gateway")),
+            raw_dir=str(patient_api.get("raw_dir", "/var/lib/rk3568-gateway/api_raw")),
         ),
         hid_input=HidInputConfig(
             enabled=bool(hid_input.get("enabled", True)),
-            keyboard_backend=str(hid_input.get("keyboard_backend", "ch9350")),
-            mouse_backend=str(hid_input.get("mouse_backend", "ch9350")),
+            keyboard_backend=str(hid_input.get("keyboard_backend", "usb_gadget")),
+            mouse_backend=str(hid_input.get("mouse_backend", "usb_gadget")),
             keyboard_device=str(hid_input.get("keyboard_device", "/dev/hidg0")),
             mouse_device=str(hid_input.get("mouse_device", "/dev/hidg1")),
-            ch9350_serial_device=str(hid_input.get("ch9350_serial_device", "/dev/ttyS1")),
+            ch9350_serial_device=str(hid_input.get("ch9350_serial_device", "")),
             ch9350_baudrate=int(hid_input.get("ch9350_baudrate", 115200)),
-            ch9350_state=int(hid_input.get("ch9350_state", 3)),
-            ch9350_set_state2=bool(hid_input.get("ch9350_set_state2", True)),
+            ch9350_state=int(hid_input.get("ch9350_state", 0)),
+            ch9350_set_state2=bool(hid_input.get("ch9350_set_state2", False)),
             ch9350_caps_led_mask=int(hid_input.get("ch9350_caps_led_mask", 1)),
-            ch9350_mouse_frame=str(hid_input.get("ch9350_mouse_frame", "relative4")),
-            ch9350_mouse_reset_to_origin=bool(hid_input.get("ch9350_mouse_reset_to_origin", True)),
-            template_path=str(hid_input.get("template_path", "/opt/rk3588_gateway/MarkInfo_SearchTitle_Config_100.json")),
+            ch9350_mouse_frame=str(hid_input.get("ch9350_mouse_frame", "absolute7")),
+            ch9350_mouse_reset_to_origin=bool(hid_input.get("ch9350_mouse_reset_to_origin", False)),
+            template_path=str(hid_input.get("template_path", "/opt/rk3568_gateway/MarkInfo_SearchTitle_Config_100.json")),
             screen_width=int(hid_input.get("screen_width", 1920)),
             screen_height=int(hid_input.get("screen_height", 1080)),
             action_delay_ms=int(hid_input.get("action_delay_ms", 120)),
@@ -258,35 +258,35 @@ def load_config(path: str | Path) -> AppConfig:
         print_capture=PrintCaptureConfig(
             enabled=bool(print_capture.get("enabled", True)),
             device=str(print_capture.get("device", "/dev/g_printer0")),
-            output_dir=str(print_capture.get("output_dir", "/var/lib/rk3588-gateway/print_jobs")),
+            output_dir=str(print_capture.get("output_dir", "/var/lib/rk3568-gateway/print_jobs")),
             chunk_size=int(print_capture.get("chunk_size", 65536)),
             idle_complete_seconds=int(print_capture.get("idle_complete_seconds", 2)),
             min_job_bytes=int(print_capture.get("min_job_bytes", 128)),
         ),
         report_pdf=ReportPdfConfig(
             enabled=bool(report_pdf.get("enabled", True)),
-            output_dir=str(report_pdf.get("output_dir", "/var/lib/rk3588-gateway/reports_pdf")),
+            output_dir=str(report_pdf.get("output_dir", "/var/lib/rk3568-gateway/reports_pdf")),
             keep_original=bool(report_pdf.get("keep_original", True)),
         ),
         msc=MscConfig(
             enabled=bool(msc.get("enabled", False)),
-            image_path=str(msc.get("image_path", "/var/lib/rk3588-gateway/msc/ums_shared.img")),
-            mount_dir=str(msc.get("mount_dir", "/mnt/rk3588-gateway-msc")),
-            output_dir=str(msc.get("output_dir", "/var/lib/rk3588-gateway/msc_files")),
-            state_dir=str(msc.get("state_dir", "/var/lib/rk3588-gateway/msc_state")),
+            image_path=str(msc.get("image_path", "/var/lib/rk3568-gateway/msc/ums_shared.img")),
+            mount_dir=str(msc.get("mount_dir", "/mnt/rk3568-gateway-msc")),
+            output_dir=str(msc.get("output_dir", "/var/lib/rk3568-gateway/msc_files")),
+            state_dir=str(msc.get("state_dir", "/var/lib/rk3568-gateway/msc_state")),
             gadget_dir=str(msc.get("gadget_dir", "/sys/kernel/config/usb_gadget/rockchip")),
             udc_device=str(msc.get("udc_device", "")),
             poll_interval_seconds=int(msc.get("poll_interval_seconds", 5)),
             stable_seconds=int(msc.get("stable_seconds", 3)),
             quiet_seconds=int(msc.get("quiet_seconds", 2)),
             init_baseline=bool(msc.get("init_baseline", True)),
-            rebuild_command=str(msc.get("rebuild_command", "/opt/rk3588_gateway/scripts/setup_usb_printer_gadget.sh")),
+            rebuild_command=str(msc.get("rebuild_command", "/opt/rk3568_gateway/scripts/setup_usb_composite_gadget.sh")),
             copy_recursive=bool(msc.get("copy_recursive", True)),
             ignore_names=list(msc.get("ignore_names", ["System Volume Information", "$RECYCLE.BIN"])),
         ),
         gpio=GpioConfig(
             enabled=bool(gpio.get("enabled", False)),
-            consumer=str(gpio.get("consumer", "rk3588-gateway")),
+            consumer=str(gpio.get("consumer", "rk3568-gateway")),
             lines=[
                 GpioLineConfig(
                     name=str(item.get("name", f"gpio{index + 1}")),

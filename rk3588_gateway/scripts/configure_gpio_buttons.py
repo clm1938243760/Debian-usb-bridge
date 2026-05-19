@@ -8,35 +8,33 @@ import yaml
 
 
 BUTTONS = [
-    ("up", 83),
-    ("down", 62),
-    ("ok", 63),
-    ("back", 478),
+    ("down", 138, "/dev/gpiochip4", 10),
+    ("ok", 139, "/dev/gpiochip4", 11),
 ]
 
 
 def main() -> int:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else "/opt/rk3588_gateway/config.yaml")
+    path = Path(sys.argv[1] if len(sys.argv) > 1 else "/opt/rk3568_gateway/config.yaml")
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError("config root must be a mapping")
 
     raw["gpio"] = {
         "enabled": True,
-        "consumer": "rk3588-gateway",
+        "consumer": "rk3568-gateway",
         "lines": [
             {
                 "name": name,
                 "enabled": True,
                 "backend": "sysfs",
-                "chip": "/dev/gpiochip0",
-                "line": number,
+                "chip": chip,
+                "line": line,
                 "number": number,
                 "direction": "in",
                 "active_low": True,
                 "default": 0,
             }
-            for name, number in BUTTONS
+            for name, number, chip, line in BUTTONS
         ],
     }
 

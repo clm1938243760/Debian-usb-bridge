@@ -1,17 +1,17 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=61,<68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rk3588-gateway"
+name = "rk3568-gateway"
 version = "0.1.0"
-description = "Headless RK3588 Debian gateway for HID, barcode, printing and API relay"
-requires-python = ">=3.10"
+description = "Headless RK3568 Debian gateway for HID, barcode, printing and API relay"
+requires-python = ">=3.7"
 dependencies = [
-  "aiohttp==3.9.5",
+  "aiohttp==3.8.6",
   "evdev==1.7.1",
-  "PyYAML==6.0.2",
-  "Pillow==10.4.0",
+  "PyYAML==6.0.1",
+  "Pillow==9.5.0",
 ]
 
 [tool.setuptools.packages.find]

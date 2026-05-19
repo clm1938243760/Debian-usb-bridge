@@ -1,0 +1,18 @@
+[Unit]
+Description=RK3568 ILI9488 SPI Status Display
+After=network-online.target rk3568-usb-gadget.service rk3568-gateway.service
+Wants=network-online.target rk3568-usb-gadget.service rk3568-gateway.service
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sh -c 'echo spi1.0 > /sys/bus/spi/drivers/fb_ili9486/unbind 2>/dev/null || true'
+ExecStartPre=/bin/sh -c 'echo spidev > /sys/bus/spi/devices/spi1.0/driver_override'
+ExecStartPre=/bin/sh -c 'echo spi1.0 > /sys/bus/spi/drivers/spidev/bind 2>/dev/null || true'
+ExecStart=/opt/rk3568_gateway/.venv/bin/python /opt/rk3568_gateway/scripts/fb_status.py --output ili9488 --spidev /dev/spidev1.0 --dc-gpio 116 --reset-gpio 109 --bl-gpio -1 --width 480 --height 320 --rotate 270 --spi-speed 16000000 --color-order rgb --pixel-format 18 --invert off --interval 0.5
+Restart=always
+RestartSec=3
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

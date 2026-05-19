@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Union
 
+from .compat import unlink_missing_ok
 from .config import VmTransferConfig
 
 LOGGER = logging.getLogger(__name__)
@@ -13,7 +15,7 @@ class VmTransfer:
     def __init__(self, config: VmTransferConfig) -> None:
         self.config = config
 
-    async def send_file(self, path: str | Path) -> bool:
+    async def send_file(self, path: Union[str, Path]) -> bool:
         if not self.config.enabled:
             LOGGER.info("vm transfer disabled")
             return False
@@ -94,7 +96,7 @@ class VmTransfer:
         if proc.returncode == 0:
             LOGGER.info("vm transfer done: %s", source)
             if not self.config.keep_local_copy:
-                source.unlink(missing_ok=True)
+                unlink_missing_ok(source)
             return True
 
         LOGGER.error(

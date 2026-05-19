@@ -7,7 +7,9 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
+from .compat import to_thread
 from .config import GpioConfig, GpioLineConfig
 
 LOGGER = logging.getLogger(__name__)
@@ -17,7 +19,7 @@ LOGGER = logging.getLogger(__name__)
 class GpioState:
     config: GpioLineConfig
     value: int
-    process: subprocess.Popen[bytes] | None = None
+    process: Optional[subprocess.Popen] = None
 
 
 class GpioController:
@@ -47,7 +49,7 @@ class GpioController:
             state = GpioState(config=line, value=self._normalize(line.default))
             self._lines[line.name] = state
             if line.backend == "sysfs":
-                await asyncio.to_thread(self._prepare_sysfs, line)
+                await to_thread(self._prepare_sysfs, line)
             if line.direction == "out":
                 await self.set_value(line.name, state.value)
             else:
@@ -92,9 +94,9 @@ class GpioController:
         if state.config.direction == "out":
             return state.value
         if state.config.backend == "sysfs":
-            raw = await asyncio.to_thread(self._read_sysfs, state.config)
+            raw = await to_thread(self._read_sysfs, state.config)
         else:
-            raw = await asyncio.to_thread(self._run_gpioget, state.config)
+            raw = await to_thread(self._run_gpioget, state.config)
         state.value = raw
         return state.value
 
@@ -104,9 +106,9 @@ class GpioController:
             raise ValueError(f"gpio {name} is not output")
         state.value = self._normalize(value)
         if state.config.backend == "sysfs":
-            await asyncio.to_thread(self._write_sysfs, state.config, state.value)
+            await to_thread(self._write_sysfs, state.config, state.value)
         else:
-            await asyncio.to_thread(self._start_gpioset, state)
+            await to_thread(self._start_gpioset, state)
         return state.value
 
     async def pulse(self, name: str, value: int = 1, duration_ms: int = 200) -> int:
