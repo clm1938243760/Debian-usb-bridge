@@ -29,12 +29,14 @@ class MscMonitor:
         device_id: str,
         report_pdf: Optional[ReportPdfConverter] = None,
         printer: Optional[Printer] = None,
+        usb_access_lock: Optional[asyncio.Lock] = None,
     ) -> None:
         self.config = config
         self.queue = queue
         self.device_id = device_id
         self.report_pdf = report_pdf
         self.printer = printer
+        self.usb_access_lock = usb_access_lock or asyncio.Lock()
         self.image_path = Path(config.image_path)
         self.mount_dir = Path(config.mount_dir)
         self.output_dir = Path(config.output_dir)
@@ -60,33 +62,36 @@ class MscMonitor:
         LOGGER.info("msc monitor watching image: %s", self.image_path)
 
         while not self._stop.is_set():
-            if not self.image_path.exists():
-                LOGGER.warning("waiting for msc image: %s", self.image_path)
-                await asyncio.sleep(self.config.poll_interval_seconds)
-                continue
-
-            current_mtime = self._image_mtime()
-            previous_mtime = self._read_last_mtime()
-            if current_mtime and not previous_mtime and self.config.init_baseline:
-                self._write_last_mtime(current_mtime)
-                LOGGER.info("msc init baseline mtime=%s", current_mtime)
-                await asyncio.sleep(self.config.poll_interval_seconds)
-                continue
-
-            if current_mtime and current_mtime != previous_mtime:
-                stable_mtime = await self._wait_host_quiet(current_mtime)
-                if not stable_mtime:
-                    await asyncio.sleep(self.config.poll_interval_seconds)
-                    continue
-                try:
-                    copied = await to_thread(self._copy_new_files)
-                    self._write_last_mtime(self._image_mtime() or stable_mtime)
-                    if copied:
-                        LOGGER.info("msc copied %d new file(s)", len(copied))
-                except Exception:
-                    LOGGER.exception("msc monitor cycle failed")
+            if self.usb_access_lock.locked():
+                LOGGER.info("msc monitor paused while USB access lock is held")
+            async with self.usb_access_lock:
+                await self._run_locked_cycle()
 
             await asyncio.sleep(self.config.poll_interval_seconds)
+
+    async def _run_locked_cycle(self) -> None:
+        if not self.image_path.exists():
+            LOGGER.warning("waiting for msc image: %s", self.image_path)
+            return
+
+        current_mtime = self._image_mtime()
+        previous_mtime = self._read_last_mtime()
+        if current_mtime and not previous_mtime and self.config.init_baseline:
+            self._write_last_mtime(current_mtime)
+            LOGGER.info("msc init baseline mtime=%s", current_mtime)
+            return
+
+        if current_mtime and current_mtime != previous_mtime:
+            stable_mtime = await self._wait_host_quiet(current_mtime)
+            if not stable_mtime:
+                return
+            try:
+                copied = await to_thread(self._copy_new_files)
+                self._write_last_mtime(self._image_mtime() or stable_mtime)
+                if copied:
+                    LOGGER.info("msc copied %d new file(s)", len(copied))
+            except Exception:
+                LOGGER.exception("msc monitor cycle failed")
 
     def _image_mtime(self) -> str:
         try:
