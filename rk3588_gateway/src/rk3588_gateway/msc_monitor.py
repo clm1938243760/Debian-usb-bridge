@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import shutil
@@ -137,11 +138,11 @@ class MscMonitor:
                 info = self._file_info(source)
                 signature = str(info["signature"])
                 LOGGER.info(
-                    "msc inspect file rel=%s size=%s mtime_ns=%s signature=%s",
+                    "msc inspect file rel=%s size=%s mtime_ns=%s sha256=%s",
                     info["rel"],
                     info["size"],
                     info["mtime_ns"],
-                    signature[:80],
+                    str(info["sha256"])[:16],
                 )
                 if signature in records:
                     skipped += 1
@@ -211,11 +212,17 @@ class MscMonitor:
     def _file_info(self, path: Path) -> dict[str, Union[str, int]]:
         rel = path.relative_to(self.mount_dir).as_posix()
         stat = path.stat()
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        sha256 = digest.hexdigest()
         return {
             "rel": rel,
             "size": stat.st_size,
             "mtime_ns": stat.st_mtime_ns,
-            "signature": self._file_signature(rel, stat.st_size, stat.st_mtime_ns),
+            "sha256": sha256,
+            "signature": f"{rel}|{stat.st_size}|{sha256}",
         }
 
     def _load_records(self) -> set[str]:
@@ -234,18 +241,7 @@ class MscMonitor:
             signature = str(item.get("signature", "")).strip()
             if signature:
                 records.add(signature)
-            rel = str(item.get("rel", "")).strip()
-            size = item.get("size")
-            mtime_ns = item.get("mtime_ns")
-            if rel and size is not None and mtime_ns is not None:
-                try:
-                    records.add(self._file_signature(rel, int(size), int(mtime_ns)))
-                except (TypeError, ValueError):
-                    continue
         return records
-
-    def _file_signature(self, rel: str, size: int, mtime_ns: int) -> str:
-        return f"{rel}|{size}|{mtime_ns}"
 
     def _append_record(self, info: dict[str, Union[str, int]], target: Path) -> None:
         signature = str(info["signature"])
