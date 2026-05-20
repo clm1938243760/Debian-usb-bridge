@@ -80,35 +80,22 @@ class PrintCapture:
         total = 0
         last_data = 0.0
         last_device_check = time.monotonic()
-        poll_error_flags = select.POLLERR | select.POLLHUP | getattr(select, "POLLNVAL", 0)
         poller = select.poll()
-        poller.register(fd, select.POLLIN | poll_error_flags)
+        poller.register(fd, select.POLLIN)
 
         try:
             while not self._thread_stop.is_set():
                 data = b""
                 events = poller.poll(100)
                 if events:
-                    flags = 0
-                    for _, event_flags in events:
-                        flags |= event_flags
-                    if flags & select.POLLIN:
-                        try:
-                            data = os.read(fd, self.config.chunk_size)
-                        except BlockingIOError:
-                            data = b""
-                        except InterruptedError:
-                            continue
-                        except OSError:
-                            LOGGER.exception("printer capture read failed, reopening")
-                            if handle is not None:
-                                self._complete_job(current, handle, total)
-                                handle = None
-                                current = None
-                                total = 0
-                            break
-                    if not data and flags & poll_error_flags:
-                        LOGGER.warning("printer gadget fd changed or closed flags=%s, reopening", flags)
+                    try:
+                        data = os.read(fd, self.config.chunk_size)
+                    except BlockingIOError:
+                        data = b""
+                    except InterruptedError:
+                        continue
+                    except OSError:
+                        LOGGER.exception("printer capture read failed, reopening")
                         if handle is not None:
                             self._complete_job(current, handle, total)
                             handle = None
