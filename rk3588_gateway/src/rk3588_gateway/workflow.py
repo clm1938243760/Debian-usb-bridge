@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from .config import AppConfig
 from .events import GatewayEvent
@@ -17,13 +17,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 class GatewayWorkflow:
-    def __init__(self, config: AppConfig, queue: EventQueue, usb_access_lock: Optional[asyncio.Lock] = None) -> None:
+    def __init__(self, config: AppConfig, queue: EventQueue) -> None:
         self.config = config
         self.queue = queue
         self.patient_api = PatientApiClient(config.patient_api)
         self.hid_output = HidOutput(config.hid_input)
         self._interactive_lock = asyncio.Lock()
-        self._usb_access_lock = usb_access_lock or asyncio.Lock()
         self.display_state = {
             "screen": "wait_scan",
             "title": "waiting for scan",
@@ -33,10 +32,6 @@ class GatewayWorkflow:
             "scan": "",
         }
         self._selection_event = None
-        self._hid_busy = False
-
-    def is_hid_busy(self) -> bool:
-        return self._hid_busy
 
     async def handle_scan(self, scan: str) -> None:
         scan = scan.strip().upper()
@@ -100,12 +95,7 @@ class GatewayWorkflow:
                 items=items,
                 selected_index=index,
             )
-            async with self._usb_access_lock:
-                self._hid_busy = True
-                try:
-                    await self.hid_output.execute_form(task)
-                finally:
-                    self._hid_busy = False
+            await self.hid_output.execute_form(task)
             self.queue.put(
                 GatewayEvent(
                     type="hid.form_done",

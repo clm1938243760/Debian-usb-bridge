@@ -44,20 +44,12 @@ async def main_async() -> None:
     gpio = GpioController(config.gpio)
     report_pdf = ReportPdfConverter(config.report_pdf)
     vm_transfer = VmTransfer(config.vm_transfer)
-    usb_access_lock = asyncio.Lock()
-    workflow = GatewayWorkflow(config, queue, usb_access_lock)
     print_capture = PrintCapture(config.print_capture, queue, config.device.id, vm_transfer, report_pdf, printer)
-    msc_monitor = MscMonitor(
-        config.msc,
-        queue,
-        config.device.id,
-        report_pdf,
-        printer,
-        usb_access_lock=usb_access_lock,
-    )
+    msc_monitor = MscMonitor(config.msc, queue, config.device.id, report_pdf, printer)
     scanner = ScannerReader(config.scanner, config.device.id)
     uploader = Uploader(config.uploader, queue)
     local_api = LocalApi(config, queue, printer, gpio)
+    workflow = GatewayWorkflow(config, queue)
     local_api.workflow = workflow
 
     stop_event = asyncio.Event()
