@@ -67,30 +67,54 @@ class PrintCapture:
                 await asyncio.sleep(2)
 
     def _capture_loop(self) -> None:
+        device_path = Path(self.config.device)
         LOGGER.info("printer capture opened: %s", self.config.device)
         try:
             fd = os.open(self.config.device, os.O_RDWR | os.O_NONBLOCK)
         except OSError:
             LOGGER.exception("printer capture read-write open failed, fallback to read-only")
             fd = os.open(self.config.device, os.O_RDONLY | os.O_NONBLOCK)
+        opened_signature = self._device_signature(device_path)
         current: Optional[Path] = None
         handle = None
         total = 0
         last_data = 0.0
+        last_device_check = time.monotonic()
+        poll_error_flags = select.POLLERR | select.POLLHUP | getattr(select, "POLLNVAL", 0)
         poller = select.poll()
-        poller.register(fd, select.POLLIN)
+        poller.register(fd, select.POLLIN | poll_error_flags)
 
         try:
             while not self._thread_stop.is_set():
                 data = b""
                 events = poller.poll(100)
                 if events:
-                    try:
-                        data = os.read(fd, self.config.chunk_size)
-                    except BlockingIOError:
-                        data = b""
-                    except InterruptedError:
-                        continue
+                    flags = 0
+                    for _, event_flags in events:
+                        flags |= event_flags
+                    if flags & select.POLLIN:
+                        try:
+                            data = os.read(fd, self.config.chunk_size)
+                        except BlockingIOError:
+                            data = b""
+                        except InterruptedError:
+                            continue
+                        except OSError:
+                            LOGGER.exception("printer capture read failed, reopening")
+                            if handle is not None:
+                                self._complete_job(current, handle, total)
+                                handle = None
+                                current = None
+                                total = 0
+                            break
+                    if not data and flags & poll_error_flags:
+                        LOGGER.warning("printer gadget fd changed or closed flags=%s, reopening", flags)
+                        if handle is not None:
+                            self._complete_job(current, handle, total)
+                            handle = None
+                            current = None
+                            total = 0
+                        break
 
                 now = time.monotonic()
                 if data:
@@ -104,15 +128,25 @@ class PrintCapture:
                     last_data = now
                     continue
 
+                if now - last_device_check >= 1.0:
+                    last_device_check = now
+                    current_signature = self._device_signature(device_path)
+                    if current_signature and current_signature != opened_signature:
+                        LOGGER.warning(
+                            "printer gadget node changed old=%s new=%s, reopening",
+                            opened_signature,
+                            current_signature,
+                        )
+                        if handle is not None:
+                            self._complete_job(current, handle, total)
+                            handle = None
+                            current = None
+                            total = 0
+                        break
+
                 if handle is not None and now - last_data >= self.config.idle_complete_seconds:
-                    handle.close()
+                    self._complete_job(current, handle, total)
                     handle = None
-                    assert current is not None
-                    if total >= self.config.min_job_bytes:
-                        self._finish_job(current, total)
-                    else:
-                        LOGGER.warning("print job too small: %s bytes=%d", current, total)
-                        unlink_missing_ok(current)
                     current = None
                     total = 0
 
@@ -120,6 +154,23 @@ class PrintCapture:
             if handle is not None:
                 handle.close()
             os.close(fd)
+
+    def _device_signature(self, path: Path) -> tuple[int, int, int]:
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            return (0, 0, 0)
+        return (int(stat.st_dev), int(stat.st_ino), int(getattr(stat, "st_rdev", 0)))
+
+    def _complete_job(self, current: Optional[Path], handle, total: int) -> None:
+        handle.close()
+        if current is None:
+            return
+        if total >= self.config.min_job_bytes:
+            self._finish_job(current, total)
+        else:
+            LOGGER.warning("print job too small: %s bytes=%d", current, total)
+            unlink_missing_ok(current)
 
     def _new_job_path(self) -> Path:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
