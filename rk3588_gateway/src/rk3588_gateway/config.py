@@ -80,6 +80,19 @@ class ReportPdfConfig:
 
 
 @dataclass(frozen=True)
+class ReportUploadConfig:
+    enabled: bool
+    endpoint: str
+    report_info_path: str
+    state_dir: str
+    poll_interval_seconds: int
+    timeout_seconds: int
+    retry_interval_seconds: int
+    max_attempts: int
+    init_baseline: bool
+
+
+@dataclass(frozen=True)
 class MscConfig:
     enabled: bool
     image_path: str
@@ -166,6 +179,7 @@ class AppConfig:
     printer: PrinterConfig
     print_capture: PrintCaptureConfig
     report_pdf: ReportPdfConfig
+    report_upload: ReportUploadConfig
     msc: MscConfig
     gpio: GpioConfig
     vm_transfer: VmTransferConfig
@@ -197,6 +211,9 @@ def load_config(path: Union[str, Path]) -> AppConfig:
     report_pdf = raw.get("report_pdf", {})
     if not isinstance(report_pdf, dict):
         raise ValueError("invalid config section: report_pdf")
+    report_upload = raw.get("report_upload", {})
+    if not isinstance(report_upload, dict):
+        raise ValueError("invalid config section: report_upload")
     msc = raw.get("msc", {})
     if not isinstance(msc, dict):
         raise ValueError("invalid config section: msc")
@@ -267,6 +284,17 @@ def load_config(path: Union[str, Path]) -> AppConfig:
             enabled=bool(report_pdf.get("enabled", True)),
             output_dir=str(report_pdf.get("output_dir", "/var/lib/rk3568-gateway/reports_pdf")),
             keep_original=bool(report_pdf.get("keep_original", True)),
+        ),
+        report_upload=ReportUploadConfig(
+            enabled=bool(report_upload.get("enabled", False)),
+            endpoint=str(report_upload.get("endpoint", "")),
+            report_info_path=str(report_upload.get("report_info_path", "/var/lib/rk3568-gateway/ReportInfo.xml")),
+            state_dir=str(report_upload.get("state_dir", "/var/lib/rk3568-gateway/report_upload_state")),
+            poll_interval_seconds=int(report_upload.get("poll_interval_seconds", 5)),
+            timeout_seconds=int(report_upload.get("timeout_seconds", 30)),
+            retry_interval_seconds=int(report_upload.get("retry_interval_seconds", 60)),
+            max_attempts=int(report_upload.get("max_attempts", 3)),
+            init_baseline=bool(report_upload.get("init_baseline", True)),
         ),
         msc=MscConfig(
             enabled=bool(msc.get("enabled", False)),
