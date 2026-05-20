@@ -16,6 +16,7 @@ from .events import GatewayEvent
 from .printer import Printer
 from .queue import EventQueue
 from .report_pdf import ReportPdfConverter
+from .report_uploader import ReportUploader
 from .vm_transfer import VmTransfer
 
 LOGGER = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class PrintCapture:
         vm_transfer: Optional[VmTransfer] = None,
         report_pdf: Optional[ReportPdfConverter] = None,
         printer: Optional[Printer] = None,
+        report_uploader: Optional[ReportUploader] = None,
     ) -> None:
         self.config = config
         self.queue = queue
@@ -37,6 +39,7 @@ class PrintCapture:
         self.vm_transfer = vm_transfer
         self.report_pdf = report_pdf
         self.printer = printer
+        self.report_uploader = report_uploader
         self.output_dir = Path(config.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._stop = asyncio.Event()
@@ -142,6 +145,7 @@ class PrintCapture:
                     )
                 )
                 self._print_pdf(pdf_path, "print report")
+                self._upload_pdf(pdf_path, "print")
         if self.vm_transfer:
             try:
                 asyncio.run(self._send_to_vm(path, total))
@@ -173,3 +177,25 @@ class PrintCapture:
             )
         except Exception:
             LOGGER.exception("print converted pdf failed: %s", path)
+
+    def _upload_pdf(self, path: Path, source_type: str) -> None:
+        if not self.report_uploader or not self.report_uploader.config.enabled:
+            return
+        try:
+            ok = self.report_uploader.upload_blocking(path)
+            self.queue.put(
+                GatewayEvent(
+                    type="report.uploaded" if ok else "report.upload_failed",
+                    device_id=self.device_id,
+                    payload={"path": str(path), "source_type": source_type},
+                )
+            )
+        except Exception:
+            LOGGER.exception("upload converted pdf failed: %s", path)
+            self.queue.put(
+                GatewayEvent(
+                    type="report.upload_failed",
+                    device_id=self.device_id,
+                    payload={"path": str(path), "source_type": source_type},
+                )
+            )
