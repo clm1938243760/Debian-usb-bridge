@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import select
@@ -62,6 +63,9 @@ class PrintCapture:
 
             try:
                 await to_thread(self._capture_loop)
+            except (asyncio.CancelledError, concurrent.futures.CancelledError):
+                LOGGER.info("print capture loop cancelled")
+                return
             except Exception:
                 LOGGER.exception("print capture loop failed")
                 await asyncio.sleep(2)
