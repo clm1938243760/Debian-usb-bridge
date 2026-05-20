@@ -23,6 +23,8 @@ class GatewayWorkflow:
         self.patient_api = PatientApiClient(config.patient_api)
         self.hid_output = HidOutput(config.hid_input)
         self._interactive_lock = asyncio.Lock()
+        self._started_at = time.time()
+        self._handled_report_events = set()
         self.display_state = {
             "screen": "wait_scan",
             "title": "waiting for scan",
@@ -30,6 +32,7 @@ class GatewayWorkflow:
             "items": [],
             "selected_index": 0,
             "scan": "",
+            "popup": None,
         }
         self._selection_event = None
 
@@ -131,23 +134,42 @@ class GatewayWorkflow:
             return
         self.display_state["selected_index"] = index
 
-    def handle_report_received(self, source: str, path: str = "", created_at: str = "") -> None:
-        if self.display_state.get("screen") in {"select_item", "inputting", "querying", "api_querying"}:
-            return
-        self._set_display(
-            "upload_done",
-            "report received",
-            "pdf converted and submitted to printer",
-            report_source=source,
-            report_path=path,
-            done_at=time.time(),
-        )
+    def handle_report_received(self, source: str, path: str = "", created_at: str = "", event_id: str = "") -> bool:
+        event_key = event_id or f"{source}|{path}|{created_at}"
+        if event_key in self._handled_report_events:
+            return False
+        if created_at and _event_time(created_at) and _event_time(created_at) < self._started_at:
+            self._handled_report_events.add(event_key)
+            return False
+        if len(self._handled_report_events) > 500:
+            self._handled_report_events.clear()
+        self._handled_report_events.add(event_key)
+
+        name = path.rsplit("/", 1)[-1] if path else ""
+        if source == "msc.file_copied":
+            title = "U盘文件已接收"
+        elif source == "print.captured":
+            title = "模拟打印已接收"
+        else:
+            title = "文件已接收"
+        self.display_state["popup"] = {
+            "title": title,
+            "message": name or "正在转换并打印",
+            "source": source,
+            "path": path,
+            "expires_at": time.time() + 2.0,
+            "event_key": event_key,
+        }
+        return True
 
     def get_display_state(self) -> dict[str, Any]:
         if self.display_state.get("screen") == "upload_done":
             done_at = float(self.display_state.get("done_at", 0) or 0)
-            if done_at and time.time() - done_at >= 5:
+            if done_at and time.time() - done_at >= 3:
                 self._set_display("wait_scan", "waiting for scan", "scan patient barcode", items=[], selected_index=0, scan="")
+        popup = self.display_state.get("popup")
+        if isinstance(popup, dict) and float(popup.get("expires_at", 0) or 0) <= time.time():
+            self.display_state["popup"] = None
         state = dict(self.display_state)
         state["updated_at"] = time.time()
         return state

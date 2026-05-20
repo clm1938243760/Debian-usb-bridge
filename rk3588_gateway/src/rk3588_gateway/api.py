@@ -127,15 +127,17 @@ class LocalApi:
         display = self.workflow.get_display_state() if self.workflow else {}
         for event in events:
             event_type = event.get("type")
-            if event_type in {"print.captured", "msc.file_copied", "report.pdf_created", "report.printed"} and self.workflow:
+            if event_type in {"print.captured", "msc.file_copied"} and self.workflow:
                 payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-                self.workflow.handle_report_received(
+                changed = self.workflow.handle_report_received(
                     str(event_type),
                     str(payload.get("path", "")),
                     str(event.get("created_at", "")),
+                    str(event.get("id", "")),
                 )
-                display = self.workflow.get_display_state()
-                break
+                if changed:
+                    display = self.workflow.get_display_state()
+                    break
         gpio = {"enabled": False, "lines": []}
         if self.gpio:
             await self.gpio.refresh_inputs()

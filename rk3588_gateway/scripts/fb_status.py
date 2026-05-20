@@ -56,6 +56,7 @@ TEXT = {
     "do_not_touch": "\u8bf7\u52ff\u64cd\u4f5c\u9f20\u6807\u952e\u76d8",
     "upload_done_title": "\u62a5\u544a\u4e0a\u4f20\u5b8c\u6210",
     "ready_scan": "\u53ef\u4ee5\u7ee7\u7eed\u626b\u7801",
+    "file_received": "\u6587\u4ef6\u5df2\u63a5\u6536",
     "no_order_title": "\u672a\u627e\u5230\u7533\u8bf7\u5355",
     "no_order_subtitle": "\u8bf7\u6838\u5bf9\u6761\u7801\u540e\u91cd\u8bd5",
     "connecting_title": "\u6b63\u5728\u542f\u52a8",
@@ -319,22 +320,44 @@ class AssetRenderer:
         display = state.get("display") if isinstance(state.get("display"), dict) else {}
         screen = str(display.get("screen", "wait_scan"))
         if error and not state:
-            return self.render_boot("checking", TEXT["service_connecting"])
+            image = self.render_boot("checking", TEXT["service_connecting"])
+            return self._with_popup(image, display.get("popup"))
         if screen == "select_item":
-            return self._select(display)
-        if screen == "inputting":
-            return self._status_page(TEXT["auto_input"], TEXT["do_not_touch"], TEXT["inputting"], (255, 183, 77))
-        if screen == "upload_done":
-            return self._status_page(TEXT["upload_done_title"], TEXT["ready_scan"], TEXT["upload_done"], (35, 196, 123))
-        if screen in ("not_found", "query_not_found"):
-            return self._status_page(TEXT["no_order_title"], TEXT["no_order_subtitle"], TEXT["not_found"], (245, 92, 92))
-        if screen in ("querying", "api_querying"):
-            return self._status_page(TEXT["querying_title"], TEXT["querying_subtitle"], TEXT["querying_order"], (70, 143, 255))
-        if screen in ("wait_report", "report_waiting"):
-            return self._status_page(TEXT["input_done"], TEXT["wait_report"], TEXT["wait_report"], (70, 143, 255))
-        if screen in ("printer_error", "gadget_error"):
-            return self._status_page(TEXT["printer_error"], TEXT["failed_subtitle"], TEXT["connection_failed"], (245, 92, 92))
-        return self._status_page(TEXT["scan_prompt"], TEXT["scan_subtitle"], TEXT["wait_scan"], (35, 196, 123))
+            image = self._select(display)
+        elif screen == "inputting":
+            image = self._status_page(TEXT["auto_input"], TEXT["do_not_touch"], TEXT["inputting"], (255, 183, 77))
+        elif screen == "upload_done":
+            image = self._status_page(TEXT["input_done"], TEXT["ready_scan"], TEXT["input_done"], (35, 196, 123))
+        elif screen in ("not_found", "query_not_found"):
+            image = self._status_page(TEXT["no_order_title"], TEXT["no_order_subtitle"], TEXT["not_found"], (245, 92, 92))
+        elif screen in ("querying", "api_querying"):
+            image = self._status_page(TEXT["querying_title"], TEXT["querying_subtitle"], TEXT["querying_order"], (70, 143, 255))
+        elif screen in ("wait_report", "report_waiting"):
+            image = self._status_page(TEXT["input_done"], TEXT["wait_report"], TEXT["wait_report"], (70, 143, 255))
+        elif screen in ("printer_error", "gadget_error"):
+            image = self._status_page(TEXT["printer_error"], TEXT["failed_subtitle"], TEXT["connection_failed"], (245, 92, 92))
+        else:
+            image = self._status_page(TEXT["scan_prompt"], TEXT["scan_subtitle"], TEXT["wait_scan"], (35, 196, 123))
+        return self._with_popup(image, display.get("popup"))
+
+    def _with_popup(self, image: Image.Image, popup: Any) -> Image.Image:
+        if not isinstance(popup, dict):
+            return image
+        title = str(popup.get("title", "") or TEXT["file_received"])
+        message = str(popup.get("message", "") or "")
+        rgba = image.convert("RGBA")
+        draw = ImageDraw.Draw(rgba, "RGBA")
+        draw.rectangle((0, 0, CANVAS_W, CANVAS_H), fill=(0, 0, 0, 76))
+        accent = (35, 196, 123)
+        draw.rounded_rectangle((42, 100, 438, 222), radius=24, fill=(255, 255, 255, 246), outline=(*accent, 210), width=2)
+        draw.rectangle((42, 138, 50, 188), fill=(*accent, 255))
+        self._center_text(draw, self._clip(draw, title, self.font_big, 330), 124, self.font_big, (22, 34, 46, 255))
+        if message:
+            message = self._clip(draw, message, self.font_mid, 330)
+        else:
+            message = "\u6b63\u5728\u8f6c\u6362\u5e76\u6253\u5370"
+        self._center_text(draw, message, 170, self.font_mid, (73, 88, 105, 255))
+        return rgba.convert("RGB")
 
     def _asset_canvas(self, key: str) -> Image.Image:
         image = self._background()
