@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -98,9 +97,6 @@ class ScannerReader:
                 LOGGER.warning("scanner device not found: %s", self.config.event_device)
             except PermissionError:
                 LOGGER.error("permission denied reading scanner: %s", self.config.event_device)
-            except (asyncio.CancelledError, concurrent.futures.CancelledError):
-                LOGGER.info("scanner loop cancelled")
-                return
             except Exception:
                 LOGGER.exception("scanner loop failed")
             await asyncio.sleep(3)

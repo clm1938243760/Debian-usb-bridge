@@ -49,12 +49,6 @@ report_pdf:
   output_dir: "/var/lib/rk3568-gateway/reports_pdf"
   keep_original: true
 
-report_upload:
-  enabled: true
-  endpoint: "http://192.168.112.139:9061/api/client/uploadOriginalReport"
-  report_info_path: "/var/lib/rk3568-gateway/ReportInfo.xml"
-  timeout_seconds: 30
-
 msc:
   enabled: true
   image_path: "/var/lib/rk3568-gateway/msc/ums_shared.img"

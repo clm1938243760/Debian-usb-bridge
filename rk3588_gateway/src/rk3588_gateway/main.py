@@ -16,7 +16,6 @@ from .printer import Printer
 from .print_capture import PrintCapture
 from .queue import EventQueue
 from .report_pdf import ReportPdfConverter
-from .report_uploader import ReportUploader
 from .uploader import Uploader
 from .vm_transfer import VmTransfer
 from .workflow import GatewayWorkflow
@@ -44,10 +43,9 @@ async def main_async() -> None:
     printer = Printer(config.printer)
     gpio = GpioController(config.gpio)
     report_pdf = ReportPdfConverter(config.report_pdf)
-    report_uploader = ReportUploader(config.report_upload)
     vm_transfer = VmTransfer(config.vm_transfer)
-    print_capture = PrintCapture(config.print_capture, queue, config.device.id, vm_transfer, report_pdf, printer, report_uploader)
-    msc_monitor = MscMonitor(config.msc, queue, config.device.id, report_pdf, printer, report_uploader)
+    print_capture = PrintCapture(config.print_capture, queue, config.device.id, vm_transfer, report_pdf, printer)
+    msc_monitor = MscMonitor(config.msc, queue, config.device.id, report_pdf, printer)
     scanner = ScannerReader(config.scanner, config.device.id)
     uploader = Uploader(config.uploader, queue)
     local_api = LocalApi(config, queue, printer, gpio)

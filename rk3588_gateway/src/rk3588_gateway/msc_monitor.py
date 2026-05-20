@@ -17,7 +17,6 @@ from .events import GatewayEvent
 from .printer import Printer
 from .queue import EventQueue
 from .report_pdf import ReportPdfConverter
-from .report_uploader import ReportUploader
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,14 +29,12 @@ class MscMonitor:
         device_id: str,
         report_pdf: Optional[ReportPdfConverter] = None,
         printer: Optional[Printer] = None,
-        report_uploader: Optional[ReportUploader] = None,
     ) -> None:
         self.config = config
         self.queue = queue
         self.device_id = device_id
         self.report_pdf = report_pdf
         self.printer = printer
-        self.report_uploader = report_uploader
         self.image_path = Path(config.image_path)
         self.mount_dir = Path(config.mount_dir)
         self.output_dir = Path(config.output_dir)
@@ -129,7 +126,7 @@ class MscMonitor:
     def _copy_new_files(self) -> list[Path]:
         udc = self._unbind_gadget()
         copied: list[Path] = []
-        pdfs_to_finish = []
+        pdfs_to_print = []
         try:
             self._detach_mass_storage_file()
             self._mount_image_ro()
@@ -173,7 +170,7 @@ class MscMonitor:
                                 payload={"source": str(target), "path": str(pdf_path), "source_type": "msc"},
                             )
                         )
-                        pdfs_to_finish.append(pdf_path)
+                        pdfs_to_print.append(pdf_path)
             if skipped:
                 LOGGER.info("msc skipped %d already copied file(s)", skipped)
             subprocess.run(["sync"], check=False)
@@ -182,9 +179,8 @@ class MscMonitor:
             if not self._rebuild_gadget():
                 self._attach_mass_storage_file()
                 self._bind_gadget(udc)
-        for pdf_path in pdfs_to_finish:
+        for pdf_path in pdfs_to_print:
             self._print_pdf(pdf_path, "msc report")
-            self._upload_pdf(pdf_path, "msc")
         return copied
 
     def _iter_files(self) -> list[Path]:
@@ -364,25 +360,3 @@ class MscMonitor:
             )
         except Exception:
             LOGGER.exception("print converted pdf failed: %s", path)
-
-    def _upload_pdf(self, path: Path, source_type: str) -> None:
-        if not self.report_uploader or not self.report_uploader.config.enabled:
-            return
-        try:
-            ok = self.report_uploader.upload_blocking(path)
-            self.queue.put(
-                GatewayEvent(
-                    type="report.uploaded" if ok else "report.upload_failed",
-                    device_id=self.device_id,
-                    payload={"path": str(path), "source_type": source_type},
-                )
-            )
-        except Exception:
-            LOGGER.exception("upload converted pdf failed: %s", path)
-            self.queue.put(
-                GatewayEvent(
-                    type="report.upload_failed",
-                    device_id=self.device_id,
-                    payload={"path": str(path), "source_type": source_type},
-                )
-            )
