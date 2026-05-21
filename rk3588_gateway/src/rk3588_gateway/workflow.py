@@ -23,6 +23,7 @@ class GatewayWorkflow:
         self.patient_api = PatientApiClient(config.patient_api)
         self.hid_output = HidOutput(config.hid_input)
         self._interactive_lock = asyncio.Lock()
+        self._hid_input_active = False
         self._started_at = time.time()
         self._handled_report_events = set()
         self.display_state = {
@@ -98,7 +99,11 @@ class GatewayWorkflow:
                 items=items,
                 selected_index=index,
             )
-            await self.hid_output.execute_form(task)
+            self._hid_input_active = True
+            try:
+                await self.hid_output.execute_form(task)
+            finally:
+                self._hid_input_active = False
             self.queue.put(
                 GatewayEvent(
                     type="hid.form_done",
@@ -115,6 +120,9 @@ class GatewayWorkflow:
                 selected_index=index,
                 done_at=time.time(),
             )
+
+    def is_hid_input_active(self) -> bool:
+        return self._hid_input_active
 
     def handle_key(self, key: str) -> None:
         if self.display_state.get("screen") != "select_item":

@@ -47,11 +47,11 @@ async def main_async() -> None:
     report_upload = ReportUploadWorker(config.report_upload, config.report_pdf, queue, config.device.id)
     vm_transfer = VmTransfer(config.vm_transfer)
     print_capture = PrintCapture(config.print_capture, queue, config.device.id, vm_transfer, report_pdf, printer)
-    msc_monitor = MscMonitor(config.msc, queue, config.device.id, report_pdf, printer)
     scanner = ScannerReader(config.scanner, config.device.id)
     uploader = Uploader(config.uploader, queue)
     local_api = LocalApi(config, queue, printer, gpio)
     workflow = GatewayWorkflow(config, queue)
+    msc_monitor = MscMonitor(config.msc, queue, config.device.id, report_pdf, printer, workflow.is_hid_input_active)
     local_api.workflow = workflow
 
     stop_event = asyncio.Event()

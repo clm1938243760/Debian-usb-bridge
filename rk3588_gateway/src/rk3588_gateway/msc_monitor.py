@@ -9,7 +9,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 from .compat import to_thread
 from .config import MscConfig
@@ -29,12 +29,14 @@ class MscMonitor:
         device_id: str,
         report_pdf: Optional[ReportPdfConverter] = None,
         printer: Optional[Printer] = None,
+        defer_reads: Optional[Callable[[], bool]] = None,
     ) -> None:
         self.config = config
         self.queue = queue
         self.device_id = device_id
         self.report_pdf = report_pdf
         self.printer = printer
+        self.defer_reads = defer_reads
         self.image_path = Path(config.image_path)
         self.mount_dir = Path(config.mount_dir)
         self.output_dir = Path(config.output_dir)
@@ -43,6 +45,7 @@ class MscMonitor:
         self.records_file = self.state_dir / "files.jsonl"
         self.last_mtime_file = self.state_dir / "last_mtime"
         self._stop = asyncio.Event()
+        self._deferred_mtime = ""
 
     def stop(self) -> None:
         self._stop.set()
@@ -74,12 +77,21 @@ class MscMonitor:
                 continue
 
             if current_mtime and current_mtime != previous_mtime:
+                if self._defer_read(current_mtime, "mtime changed"):
+                    await asyncio.sleep(self.config.poll_interval_seconds)
+                    continue
                 stable_mtime = await self._wait_host_quiet(current_mtime)
                 if not stable_mtime:
                     await asyncio.sleep(self.config.poll_interval_seconds)
                     continue
+                if self._defer_read(stable_mtime, "host quiet"):
+                    await asyncio.sleep(self.config.poll_interval_seconds)
+                    continue
                 try:
                     copied = await to_thread(self._copy_new_files)
+                    if copied is None:
+                        await asyncio.sleep(self.config.poll_interval_seconds)
+                        continue
                     self._write_last_mtime(self._image_mtime() or stable_mtime)
                     if copied:
                         LOGGER.info("msc copied %d new file(s)", len(copied))
@@ -103,6 +115,23 @@ class MscMonitor:
     def _write_last_mtime(self, value: str) -> None:
         self.last_mtime_file.write_text(value, encoding="utf-8")
 
+    def _defer_read(self, mtime: str, stage: str) -> bool:
+        if not self.defer_reads:
+            self._deferred_mtime = ""
+            return False
+        try:
+            deferred = bool(self.defer_reads())
+        except Exception:
+            LOGGER.exception("msc defer predicate failed")
+            deferred = False
+        if not deferred:
+            self._deferred_mtime = ""
+            return False
+        if self._deferred_mtime != mtime:
+            LOGGER.info("msc read deferred during hid input stage=%s mtime=%s", stage, mtime)
+            self._deferred_mtime = mtime
+        return True
+
     async def _wait_host_quiet(self, first_mtime: str) -> str:
         last_mtime = first_mtime
         quiet_started = time.monotonic()
@@ -123,7 +152,9 @@ class MscMonitor:
 
         return ""
 
-    def _copy_new_files(self) -> list[Path]:
+    def _copy_new_files(self) -> Optional[list[Path]]:
+        if self._defer_read(self._image_mtime(), "before unbind"):
+            return None
         udc = self._unbind_gadget()
         copied: list[Path] = []
         pdfs_to_print = []
