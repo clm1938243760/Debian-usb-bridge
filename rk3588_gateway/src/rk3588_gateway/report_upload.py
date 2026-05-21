@@ -143,8 +143,12 @@ class ReportUploadWorker:
                 status = int(getattr(response, "status", response.getcode()))
                 text = response.read().decode("utf-8", errors="replace")
             if 200 <= status < 300:
-                LOGGER.info("report upload submitted path=%s status=%s response=%s", pdf_path, status, text[:500])
-                return True, ""
+                ok, error = _response_is_success(status, text)
+                if ok:
+                    LOGGER.info("report upload submitted path=%s status=%s response=%s", pdf_path, status, text[:500])
+                    return True, ""
+                LOGGER.error("report upload rejected path=%s %s", pdf_path, error)
+                return False, error
             error = "status=%s response=%s" % (status, text[:500])
             LOGGER.error("report upload failed path=%s %s", pdf_path, error)
             return False, error
@@ -230,3 +234,23 @@ def _multipart_body(boundary: str, files: Iterable[Tuple[str, Path, str]]) -> by
         )
     chunks.append(b"--" + boundary_bytes + b"--\r\n")
     return b"".join(chunks)
+
+
+def _response_is_success(status: int, text: str) -> Tuple[bool, str]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return True, ""
+
+    if not isinstance(payload, dict):
+        return True, ""
+
+    success = payload.get("success")
+    code = str(payload.get("code", "")).upper()
+    if success is True or code == "SUCCESS":
+        return True, ""
+
+    if success is False or code in ("FAIL", "FAILED", "ERROR"):
+        return False, "status=%s response=%s" % (status, text[:500])
+
+    return True, ""
