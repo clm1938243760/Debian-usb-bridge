@@ -30,6 +30,7 @@ class MscMonitor:
         report_pdf: Optional[ReportPdfConverter] = None,
         printer: Optional[Printer] = None,
         defer_reads: Optional[Callable[[], bool]] = None,
+        before_gadget_unbind: Optional[Callable[[], bool]] = None,
         after_gadget_rebind: Optional[Callable[[], None]] = None,
     ) -> None:
         self.config = config
@@ -38,6 +39,7 @@ class MscMonitor:
         self.report_pdf = report_pdf
         self.printer = printer
         self.defer_reads = defer_reads
+        self.before_gadget_unbind = before_gadget_unbind
         self.after_gadget_rebind = after_gadget_rebind
         self.image_path = Path(config.image_path)
         self.mount_dir = Path(config.mount_dir)
@@ -157,6 +159,9 @@ class MscMonitor:
     def _copy_new_files(self) -> Optional[list[Path]]:
         if self._defer_read(self._image_mtime(), "before unbind"):
             return None
+        if not self._prepare_gadget_unbind():
+            LOGGER.warning("msc skip local read because printer capture did not close before UDC unbind")
+            return None
         udc = self._unbind_gadget()
         copied: list[Path] = []
         pdfs_to_print = []
@@ -216,6 +221,15 @@ class MscMonitor:
         for pdf_path in pdfs_to_print:
             self._print_pdf(pdf_path, "msc report")
         return copied
+
+    def _prepare_gadget_unbind(self) -> bool:
+        if not self.before_gadget_unbind:
+            return True
+        try:
+            return bool(self.before_gadget_unbind())
+        except Exception:
+            LOGGER.exception("before gadget unbind callback failed")
+            return False
 
     def _notify_gadget_rebound(self) -> None:
         if not self.after_gadget_rebind:

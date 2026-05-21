@@ -7,7 +7,7 @@ import select
 import time
 from datetime import datetime
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from typing import Optional
 
 from .compat import to_thread, unlink_missing_ok
@@ -42,6 +42,10 @@ class PrintCapture:
         self._stop = asyncio.Event()
         self._thread_stop = Event()
         self._reopen_requested = Event()
+        self._pause_requested = Event()
+        self._closed = Event()
+        self._closed.set()
+        self._open_lock = Lock()
 
     def stop(self) -> None:
         self._stop.set()
@@ -52,12 +56,36 @@ class PrintCapture:
         LOGGER.info("printer capture reopen requested")
         self._reopen_requested.set()
 
+    def pause_for_gadget_unbind(self, timeout_seconds: float = 5.0) -> bool:
+        if not self.config.enabled:
+            return True
+        LOGGER.info("printer capture pause requested before gadget unbind")
+        self._pause_requested.set()
+        self._reopen_requested.set()
+        with self._open_lock:
+            pass
+        if self._closed.wait(timeout_seconds):
+            LOGGER.info("printer capture fd closed before gadget unbind")
+            return True
+        LOGGER.warning("printer capture fd close timeout before gadget unbind")
+        return False
+
+    def resume_after_gadget_rebind(self) -> None:
+        if not self.config.enabled:
+            return
+        LOGGER.info("printer capture resume requested after gadget rebind")
+        self._pause_requested.clear()
+        self._reopen_requested.set()
+
     async def run(self) -> None:
         if not self.config.enabled:
             LOGGER.info("print capture disabled")
             return
 
         while not self._stop.is_set():
+            if self._pause_requested.is_set():
+                await asyncio.sleep(0.1)
+                continue
             if not Path(self.config.device).exists():
                 LOGGER.warning("waiting for printer gadget: %s", self.config.device)
                 await asyncio.sleep(2)
@@ -70,12 +98,16 @@ class PrintCapture:
                 await asyncio.sleep(2)
 
     def _capture_loop(self) -> None:
-        LOGGER.info("printer capture opened: %s", self.config.device)
-        try:
-            fd = os.open(self.config.device, os.O_RDWR | os.O_NONBLOCK)
-        except OSError:
-            LOGGER.exception("printer capture read-write open failed, fallback to read-only")
-            fd = os.open(self.config.device, os.O_RDONLY | os.O_NONBLOCK)
+        with self._open_lock:
+            if self._pause_requested.is_set():
+                return
+            LOGGER.info("printer capture opened: %s", self.config.device)
+            try:
+                fd = os.open(self.config.device, os.O_RDWR | os.O_NONBLOCK)
+            except OSError:
+                LOGGER.exception("printer capture read-write open failed, fallback to read-only")
+                fd = os.open(self.config.device, os.O_RDONLY | os.O_NONBLOCK)
+            self._closed.clear()
         current: Optional[Path] = None
         handle = None
         total = 0
@@ -86,9 +118,12 @@ class PrintCapture:
 
         try:
             while not self._thread_stop.is_set():
-                if self._reopen_requested.is_set():
+                if self._reopen_requested.is_set() or self._pause_requested.is_set():
                     self._reopen_requested.clear()
-                    LOGGER.info("printer capture closing fd for reopen")
+                    if self._pause_requested.is_set():
+                        LOGGER.info("printer capture closing fd for gadget unbind")
+                    else:
+                        LOGGER.info("printer capture closing fd for reopen")
                     if handle is not None:
                         handle.close()
                         handle = None
@@ -137,6 +172,7 @@ class PrintCapture:
             if handle is not None:
                 handle.close()
             os.close(fd)
+            self._closed.set()
 
     def _new_job_path(self) -> Path:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")

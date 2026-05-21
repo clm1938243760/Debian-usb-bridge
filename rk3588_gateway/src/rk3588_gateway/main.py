@@ -58,7 +58,8 @@ async def main_async() -> None:
         report_pdf,
         printer,
         workflow.is_hid_input_active,
-        print_capture.request_reopen,
+        print_capture.pause_for_gadget_unbind,
+        print_capture.resume_after_gadget_rebind,
     )
     local_api.workflow = workflow
 
