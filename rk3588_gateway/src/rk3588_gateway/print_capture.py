@@ -41,10 +41,16 @@ class PrintCapture:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._stop = asyncio.Event()
         self._thread_stop = Event()
+        self._reopen_requested = Event()
 
     def stop(self) -> None:
         self._stop.set()
         self._thread_stop.set()
+        self._reopen_requested.set()
+
+    def request_reopen(self) -> None:
+        LOGGER.info("printer capture reopen requested")
+        self._reopen_requested.set()
 
     async def run(self) -> None:
         if not self.config.enabled:
@@ -76,9 +82,23 @@ class PrintCapture:
         last_data = 0.0
         poller = select.poll()
         poller.register(fd, select.POLLIN)
+        self._reopen_requested.clear()
 
         try:
             while not self._thread_stop.is_set():
+                if self._reopen_requested.is_set():
+                    self._reopen_requested.clear()
+                    LOGGER.info("printer capture closing fd for reopen")
+                    if handle is not None:
+                        handle.close()
+                        handle = None
+                        if current is not None:
+                            LOGGER.warning("discard partial print job during gadget reopen: %s bytes=%d", current, total)
+                            unlink_missing_ok(current)
+                        current = None
+                        total = 0
+                    break
+
                 data = b""
                 events = poller.poll(100)
                 if events:

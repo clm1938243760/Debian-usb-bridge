@@ -30,6 +30,7 @@ class MscMonitor:
         report_pdf: Optional[ReportPdfConverter] = None,
         printer: Optional[Printer] = None,
         defer_reads: Optional[Callable[[], bool]] = None,
+        after_gadget_rebind: Optional[Callable[[], None]] = None,
     ) -> None:
         self.config = config
         self.queue = queue
@@ -37,6 +38,7 @@ class MscMonitor:
         self.report_pdf = report_pdf
         self.printer = printer
         self.defer_reads = defer_reads
+        self.after_gadget_rebind = after_gadget_rebind
         self.image_path = Path(config.image_path)
         self.mount_dir = Path(config.mount_dir)
         self.output_dir = Path(config.output_dir)
@@ -210,9 +212,18 @@ class MscMonitor:
             if not self._rebuild_gadget():
                 self._attach_mass_storage_file()
                 self._bind_gadget(udc)
+            self._notify_gadget_rebound()
         for pdf_path in pdfs_to_print:
             self._print_pdf(pdf_path, "msc report")
         return copied
+
+    def _notify_gadget_rebound(self) -> None:
+        if not self.after_gadget_rebind:
+            return
+        try:
+            self.after_gadget_rebind()
+        except Exception:
+            LOGGER.exception("after gadget rebind callback failed")
 
     def _iter_files(self) -> list[Path]:
         iterator = self.mount_dir.rglob("*") if self.config.copy_recursive else self.mount_dir.glob("*")

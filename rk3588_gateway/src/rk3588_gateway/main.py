@@ -51,7 +51,15 @@ async def main_async() -> None:
     uploader = Uploader(config.uploader, queue)
     local_api = LocalApi(config, queue, printer, gpio)
     workflow = GatewayWorkflow(config, queue)
-    msc_monitor = MscMonitor(config.msc, queue, config.device.id, report_pdf, printer, workflow.is_hid_input_active)
+    msc_monitor = MscMonitor(
+        config.msc,
+        queue,
+        config.device.id,
+        report_pdf,
+        printer,
+        workflow.is_hid_input_active,
+        print_capture.request_reopen,
+    )
     local_api.workflow = workflow
 
     stop_event = asyncio.Event()
