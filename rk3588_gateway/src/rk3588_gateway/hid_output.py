@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from threading import Lock
 from typing import Any, Optional
 
 from .compat import to_thread
@@ -69,6 +70,8 @@ class HidOutput:
         self._led_task = None
         self._ch9350_fd: Optional[int] = None
         self._ch9350_rx = bytearray()
+        self._usb_keyboard_fd: Optional[int] = None
+        self._usb_keyboard_lock = Lock()
 
     async def execute_form(self, task: dict[str, Any]) -> None:
         if not self.config.enabled:
@@ -82,33 +85,36 @@ class HidOutput:
             await self._wait_device(self.config.mouse_device)
         elif self.config.mouse_backend == "ch9350":
             await self._ensure_ch9350()
-        self._start_led_reader()
-        await asyncio.sleep(self.config.start_delay_ms / 1000)
+        try:
+            self._start_led_reader()
+            await asyncio.sleep(self.config.start_delay_ms / 1000)
 
-        patient = task.get("patient", {})
-        events = task.get("eventClassList", [])
-        LOGGER.info("hid form start events=%d patient_id=%s", len(events), patient.get("patient_id", ""))
-        for event in events:
-            click_type = int(event.get("clickType", -1))
-            x = int(event.get("x", 0))
-            y = int(event.get("y", 0))
-            if click_type == 0:
-                await self.click(x, y)
-            elif click_type == 1:
-                await self.input_text(
-                    str(event.get("value", "")),
-                    x,
-                    y,
-                    field=str(event.get("field", "")),
-                )
-            elif click_type == 7:
-                condition = event.get("condition") or {}
-                if str(patient.get(str(condition.get("field", "")), "")) == str(condition.get("equals", "")):
+            patient = task.get("patient", {})
+            events = task.get("eventClassList", [])
+            LOGGER.info("hid form start events=%d patient_id=%s", len(events), patient.get("patient_id", ""))
+            for event in events:
+                click_type = int(event.get("clickType", -1))
+                x = int(event.get("x", 0))
+                y = int(event.get("y", 0))
+                if click_type == 0:
                     await self.click(x, y)
-            else:
-                LOGGER.warning("unknown hid clickType=%s event=%s", click_type, event)
-            await asyncio.sleep(self.config.action_delay_ms / 1000)
-        LOGGER.info("hid form done")
+                elif click_type == 1:
+                    await self.input_text(
+                        str(event.get("value", "")),
+                        x,
+                        y,
+                        field=str(event.get("field", "")),
+                    )
+                elif click_type == 7:
+                    condition = event.get("condition") or {}
+                    if str(patient.get(str(condition.get("field", "")), "")) == str(condition.get("equals", "")):
+                        await self.click(x, y)
+                else:
+                    LOGGER.warning("unknown hid clickType=%s event=%s", click_type, event)
+                await asyncio.sleep(self.config.action_delay_ms / 1000)
+            LOGGER.info("hid form done")
+        finally:
+            self._stop_led_reader()
 
     async def click(self, x: int, y: int) -> None:
         if self.config.mouse_backend == "ch9350":
@@ -240,34 +246,34 @@ class HidOutput:
             return
         self._led_task = asyncio.create_task(self._led_reader_loop())
 
+    def _stop_led_reader(self) -> None:
+        if self._led_task and not self._led_task.done():
+            self._led_task.cancel()
+
     async def _led_reader_loop(self) -> None:
         if self.config.keyboard_backend == "ch9350":
             await self._ch9350_led_reader_loop()
             return
         while True:
             try:
-                await self._wait_device(self.config.keyboard_device)
-                fd = os.open(self.config.keyboard_device, os.O_RDONLY | os.O_NONBLOCK)
+                await self._ensure_usb_keyboard_fd()
                 LOGGER.info("keyboard led reader start")
-                try:
-                    while True:
-                        try:
-                            data = os.read(fd, 8)
-                            if data:
-                                self._led_state = data[0]
-                                LOGGER.info(
-                                    "keyboard led state=0x%02x caps=%s",
-                                    data[0],
-                                    "on" if data[0] & 2 else "off",
-                                )
-                        except BlockingIOError:
-                            await asyncio.sleep(0.05)
-                finally:
-                    os.close(fd)
+                while True:
+                    data = await to_thread(self._read_usb_keyboard_led)
+                    if data:
+                        self._led_state = data[0]
+                        LOGGER.info(
+                            "keyboard led state=0x%02x caps=%s",
+                            data[0],
+                            "on" if data[0] & 2 else "off",
+                        )
+                    else:
+                        await asyncio.sleep(0.05)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 LOGGER.exception("keyboard led reader failed")
+                self._close_usb_keyboard_fd()
                 await asyncio.sleep(1)
 
     async def _ch9350_led_reader_loop(self) -> None:
@@ -347,7 +353,7 @@ class HidOutput:
         if self.config.keyboard_backend == "ch9350":
             await self._write_ch9350_keyboard(report)
             return
-        await to_thread(self._write_file, self.config.keyboard_device, report)
+        await self._write_usb_keyboard(report)
 
     async def _write_mouse(self, button: int, ax: int, ay: int) -> None:
         report = bytes([button, ax & 0xFF, (ax >> 8) & 0xFF, ay & 0xFF, (ay >> 8) & 0xFF])
@@ -356,6 +362,53 @@ class HidOutput:
     def _write_file(self, path: str, data: bytes) -> None:
         with open(path, "wb", buffering=0) as handle:
             handle.write(data)
+
+    async def _ensure_usb_keyboard_fd(self) -> None:
+        if self._usb_keyboard_fd is not None:
+            return
+        await self._wait_device(self.config.keyboard_device)
+        await to_thread(self._open_usb_keyboard_fd)
+
+    def _open_usb_keyboard_fd(self) -> None:
+        with self._usb_keyboard_lock:
+            if self._usb_keyboard_fd is None:
+                self._usb_keyboard_fd = os.open(self.config.keyboard_device, os.O_RDWR | os.O_NONBLOCK)
+                LOGGER.info("usb keyboard gadget opened rw: %s", self.config.keyboard_device)
+
+    def _close_usb_keyboard_fd(self) -> None:
+        with self._usb_keyboard_lock:
+            fd = self._usb_keyboard_fd
+            self._usb_keyboard_fd = None
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    async def _write_usb_keyboard(self, report: bytes) -> None:
+        await self._ensure_usb_keyboard_fd()
+        try:
+            await to_thread(self._write_usb_keyboard_once, report)
+        except OSError:
+            LOGGER.exception("usb keyboard write failed, reopening")
+            self._close_usb_keyboard_fd()
+            await self._ensure_usb_keyboard_fd()
+            await to_thread(self._write_usb_keyboard_once, report)
+
+    def _write_usb_keyboard_once(self, report: bytes) -> None:
+        with self._usb_keyboard_lock:
+            if self._usb_keyboard_fd is None:
+                raise FileNotFoundError(self.config.keyboard_device)
+            os.write(self._usb_keyboard_fd, report)
+
+    def _read_usb_keyboard_led(self) -> bytes:
+        with self._usb_keyboard_lock:
+            if self._usb_keyboard_fd is None:
+                raise FileNotFoundError(self.config.keyboard_device)
+            try:
+                return os.read(self._usb_keyboard_fd, 8)
+            except BlockingIOError:
+                return b""
 
     async def _ensure_ch9350(self) -> None:
         if self._ch9350_fd is not None:
