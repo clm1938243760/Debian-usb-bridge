@@ -127,11 +127,13 @@ class LocalApi:
         display = self.workflow.get_display_state() if self.workflow else {}
         for event in events:
             event_type = event.get("type")
-            if event_type in {"print.captured", "msc.file_copied"} and self.workflow:
+            if event_type in {"report.uploaded", "report.upload_failed"} and self.workflow:
                 payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-                changed = self.workflow.handle_report_received(
+                changed = self.workflow.handle_report_upload(
                     str(event_type),
                     str(payload.get("path", "")),
+                    str(payload.get("error", "")),
+                    bool(payload.get("printed", False)),
                     str(event.get("created_at", "")),
                     str(event.get("id", "")),
                 )

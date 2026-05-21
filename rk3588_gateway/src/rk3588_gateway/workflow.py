@@ -170,6 +170,41 @@ class GatewayWorkflow:
         }
         return True
 
+    def handle_report_upload(
+        self,
+        source: str,
+        path: str = "",
+        error: str = "",
+        printed: bool = False,
+        created_at: str = "",
+        event_id: str = "",
+    ) -> bool:
+        event_key = event_id or f"{source}|{path}|{created_at}"
+        if event_key in self._handled_report_events:
+            return False
+        if created_at and _event_time(created_at) and _event_time(created_at) < self._started_at:
+            self._handled_report_events.add(event_key)
+            return False
+        if len(self._handled_report_events) > 500:
+            self._handled_report_events.clear()
+        self._handled_report_events.add(event_key)
+
+        if source == "report.uploaded":
+            title = "报告上传成功"
+            message = "已提交实体打印" if printed else "上传成功，未打印"
+        else:
+            title = "报告上传失败"
+            message = _short_error(error) or (path.rsplit("/", 1)[-1] if path else "未提交打印")
+        self.display_state["popup"] = {
+            "title": title,
+            "message": message,
+            "source": source,
+            "path": path,
+            "expires_at": time.time() + 2.0,
+            "event_key": event_key,
+        }
+        return True
+
     def get_display_state(self) -> dict[str, Any]:
         if self.display_state.get("screen") == "upload_done":
             done_at = float(self.display_state.get("done_at", 0) or 0)
@@ -237,3 +272,16 @@ def _event_time(created_at: str) -> float:
         return datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp()
     except Exception:
         return 0.0
+
+
+def _short_error(error: str) -> str:
+    text = str(error or "").strip()
+    if not text:
+        return ""
+    for marker in ('"msg":"', '"msg": "'):
+        if marker in text:
+            start = text.find(marker) + len(marker)
+            end = text.find('"', start)
+            if end > start:
+                return text[start:end][:28]
+    return text[:28]

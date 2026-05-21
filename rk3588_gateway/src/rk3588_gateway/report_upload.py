@@ -11,11 +11,12 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 from .compat import to_thread
 from .config import ReportPdfConfig, ReportUploadConfig
 from .events import GatewayEvent
+from .printer import Printer
 from .queue import EventQueue
 
 LOGGER = logging.getLogger(__name__)
@@ -28,11 +29,13 @@ class ReportUploadWorker:
         report_pdf_config: ReportPdfConfig,
         queue: EventQueue,
         device_id: str,
+        printer: Optional[Printer] = None,
     ) -> None:
         self.config = config
         self.report_pdf_config = report_pdf_config
         self.queue = queue
         self.device_id = device_id
+        self.printer = printer
         self.watch_dir = Path(report_pdf_config.output_dir)
         self.state_dir = Path(config.state_dir)
         self.records_file = self.state_dir / "uploads.jsonl"
@@ -101,10 +104,13 @@ class ReportUploadWorker:
             if attempts and now - last_attempt_at < self.config.retry_interval_seconds:
                 continue
 
-            ok, error = self._upload(path)
+            ok, error, response_text = self._upload(path)
             attempts += 1
             status = "uploaded" if ok else "failed"
-            self._append_record(info, status, attempts, error)
+            printed = False
+            if ok:
+                printed = self._print_after_upload(path)
+            self._append_record(info, status, attempts, error, response_text)
             records[signature] = {
                 "status": status,
                 "attempts": attempts,
@@ -114,11 +120,17 @@ class ReportUploadWorker:
                 GatewayEvent(
                     type="report.uploaded" if ok else "report.upload_failed",
                     device_id=self.device_id,
-                    payload={"path": str(path), "signature": signature, "attempts": attempts, "error": error},
+                    payload={
+                        "path": str(path),
+                        "signature": signature,
+                        "attempts": attempts,
+                        "error": error,
+                        "printed": printed,
+                    },
                 )
             )
 
-    def _upload(self, pdf_path: Path) -> Tuple[bool, str]:
+    def _upload(self, pdf_path: Path) -> Tuple[bool, str, str]:
         boundary = "----rk3568-gateway-%s" % uuid.uuid4().hex
         report_info = Path(self.config.report_info_path)
         body = _multipart_body(
@@ -146,21 +158,38 @@ class ReportUploadWorker:
                 ok, error = _response_is_success(status, text)
                 if ok:
                     LOGGER.info("report upload submitted path=%s status=%s response=%s", pdf_path, status, text[:500])
-                    return True, ""
+                    return True, "", text
                 LOGGER.error("report upload rejected path=%s %s", pdf_path, error)
-                return False, error
+                return False, error, text
             error = "status=%s response=%s" % (status, text[:500])
             LOGGER.error("report upload failed path=%s %s", pdf_path, error)
-            return False, error
+            return False, error, text
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             error = "status=%s response=%s" % (exc.code, detail[:500])
             LOGGER.error("report upload http error path=%s %s", pdf_path, error)
-            return False, error
+            return False, error, detail
         except Exception as exc:
             error = str(exc)
             LOGGER.exception("report upload exception path=%s", pdf_path)
-            return False, error
+            return False, error, ""
+
+    def _print_after_upload(self, pdf_path: Path) -> bool:
+        if not self.printer:
+            return False
+        try:
+            ok = self.printer.print_file_blocking(pdf_path, title="uploaded report")
+            self.queue.put(
+                GatewayEvent(
+                    type="report.printed" if ok else "report.print_failed",
+                    device_id=self.device_id,
+                    payload={"path": str(pdf_path), "source_type": "upload"},
+                )
+            )
+            return ok
+        except Exception:
+            LOGGER.exception("print uploaded pdf failed: %s", pdf_path)
+            return False
 
     def _pdf_files(self) -> list[Path]:
         if not self.watch_dir.exists():
@@ -201,13 +230,21 @@ class ReportUploadWorker:
                 records[signature] = item
         return records
 
-    def _append_record(self, info: Dict[str, object], status: str, attempts: int, error: str) -> None:
+    def _append_record(
+        self,
+        info: Dict[str, object],
+        status: str,
+        attempts: int,
+        error: str,
+        response_text: str = "",
+    ) -> None:
         record = dict(info)
         record.update(
             {
                 "status": status,
                 "attempts": attempts,
                 "error": error[:500],
+                "response": response_text[:1000],
                 "attempt_at": time.time(),
                 "created_at": datetime.now().isoformat(timespec="seconds"),
             }
@@ -247,10 +284,17 @@ def _response_is_success(status: int, text: str) -> Tuple[bool, str]:
 
     success = payload.get("success")
     code = str(payload.get("code", "")).upper()
-    if success is True or code == "SUCCESS":
-        return True, ""
-
     if success is False or code in ("FAIL", "FAILED", "ERROR"):
         return False, "status=%s response=%s" % (status, text[:500])
+
+    if code and code != "SUCCESS":
+        return False, "status=%s response=%s" % (status, text[:500])
+
+    data = payload.get("data")
+    if isinstance(data, dict) and "code" in data and str(data.get("code", "")) != "100":
+        return False, "status=%s response=%s" % (status, text[:500])
+
+    if success is True or code == "SUCCESS":
+        return True, ""
 
     return True, ""

@@ -44,9 +44,9 @@ async def main_async() -> None:
     printer = Printer(config.printer)
     gpio = GpioController(config.gpio)
     report_pdf = ReportPdfConverter(config.report_pdf)
-    report_upload = ReportUploadWorker(config.report_upload, config.report_pdf, queue, config.device.id)
+    report_upload = ReportUploadWorker(config.report_upload, config.report_pdf, queue, config.device.id, printer)
     vm_transfer = VmTransfer(config.vm_transfer)
-    print_capture = PrintCapture(config.print_capture, queue, config.device.id, vm_transfer, report_pdf, printer)
+    print_capture = PrintCapture(config.print_capture, queue, config.device.id, vm_transfer, report_pdf, None)
     scanner = ScannerReader(config.scanner, config.device.id)
     uploader = Uploader(config.uploader, queue)
     local_api = LocalApi(config, queue, printer, gpio)
@@ -56,7 +56,7 @@ async def main_async() -> None:
         queue,
         config.device.id,
         report_pdf,
-        printer,
+        None,
         workflow.is_hid_input_active,
         print_capture.pause_for_gadget_unbind,
         print_capture.resume_after_gadget_rebind,
