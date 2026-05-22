@@ -94,7 +94,7 @@ class ReportUploadWorker:
             info = self._file_info(path)
             signature = str(info["signature"])
             record = records.get(signature)
-            if record and str(record.get("status", "")) in ("uploaded", "baseline"):
+            if record and str(record.get("status", "")) in ("uploaded", "baseline", "failed"):
                 continue
 
             attempts = int(record.get("attempts", 0)) if record else 0
