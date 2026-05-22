@@ -102,14 +102,16 @@ class GatewayWorkflow:
             self._raise_if_stale(generation)
             items = [_record_item(record) for record in records]
             device_type = self.config.device.type.strip()
-            selected_index = _matching_exam_index(records, device_type)
+            matching_indices = _matching_exam_indices(records, device_type)
+            selected_index = matching_indices[0] if matching_indices else None
             patient_exam_items = _exam_item_names(records)
-            auto_input = selected_index is not None
+            auto_input = len(matching_indices) == 1
             LOGGER.info(
-                "scan workflow decision code=%s device_type=%s auto_input=%s api_records=%d grouped_items=%d patient_items=%s",
+                "scan workflow decision code=%s device_type=%s auto_input=%s matching_items=%d api_records=%d grouped_items=%d patient_items=%s",
                 scan,
                 device_type,
                 auto_input,
+                len(matching_indices),
                 len(raw_records),
                 len(records),
                 patient_exam_items,
@@ -124,7 +126,33 @@ class GatewayWorkflow:
                     )
                 )
                 return
-            index = selected_index
+
+            if len(matching_indices) > 1:
+                choice_items = [_record_item(records[index]) for index in matching_indices]
+                self._selection_event = asyncio.Event()
+                self._set_scan_display(
+                    generation,
+                    "select_item",
+                    "select order",
+                    "DOWN choose, OK confirm",
+                    scan=scan,
+                    items=choice_items,
+                    selected_index=0,
+                    patient_exam_items=patient_exam_items,
+                    device_type=device_type,
+                )
+                LOGGER.info(
+                    "scan workflow waiting for item choice code=%s device_type=%s choices=%d",
+                    scan,
+                    device_type,
+                    len(choice_items),
+                )
+                choice = await self._wait_selection()
+                self._raise_if_stale(generation)
+                index = matching_indices[choice % len(matching_indices)]
+            else:
+                index = selected_index
+
             record = records[index]
             selected_exam_item = _exam_item_name(record)
             other_exam_items = [
@@ -359,9 +387,12 @@ class GatewayWorkflow:
         return state
 
     async def _wait_selection(self) -> int:
-        self._selection_event = asyncio.Event()
+        if self._selection_event is None or self._selection_event.is_set():
+            self._selection_event = asyncio.Event()
         await self._selection_event.wait()
-        return int(self.display_state.get("selected_index", 0))
+        choice = int(self.display_state.get("selected_index", 0))
+        self._selection_event = None
+        return choice
 
     def _set_display(self, screen: str, title: str, message: str, **extra: Any) -> None:
         self.display_state.update({"screen": screen, "title": title, "message": message, **extra})
@@ -424,14 +455,20 @@ def _exam_item_names(records: list[dict[str, Any]]) -> list[str]:
 
 
 def _matching_exam_index(records: list[dict[str, Any]], device_type: str) -> Optional[int]:
+    indices = _matching_exam_indices(records, device_type)
+    return indices[0] if indices else None
+
+
+def _matching_exam_indices(records: list[dict[str, Any]], device_type: str) -> list[int]:
     target = _normalize_exam_item(device_type)
     if not target:
-        return None
+        return []
+    indices = []
     for index, record in enumerate(records):
         candidate = _normalize_exam_item(_exam_item_name(record))
         if candidate == target or target in candidate:
-            return index
-    return None
+            indices.append(index)
+    return indices
 
 
 def _group_records_by_exam_item(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -442,7 +479,12 @@ def _group_records_by_exam_item(records: list[dict[str, Any]]) -> list[dict[str,
         if not items:
             items = [""]
         for item in items:
-            key = item or f"{record.get('patient_id', '')}|{record.get('his_exam_no', '')}|{record.get('report_no', '')}"
+            key = "%s|%s|%s|%s" % (
+                item,
+                record.get("patient_id", ""),
+                record.get("his_exam_no", ""),
+                record.get("report_no", ""),
+            )
             if key in seen:
                 continue
             seen.add(key)
