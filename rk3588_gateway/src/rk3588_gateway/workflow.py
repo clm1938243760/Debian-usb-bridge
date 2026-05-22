@@ -16,6 +16,7 @@ from .queue import EventQueue
 LOGGER = logging.getLogger(__name__)
 HID_FORM_MIN_TIMEOUT_SECONDS = 30.0
 HID_FORM_MAX_TIMEOUT_SECONDS = 120.0
+EXAM_ITEM_KEYS = ("exam_item", "exam_item_name", "examItemName", "examItem")
 
 
 class GatewayWorkflow:
@@ -398,7 +399,7 @@ def _safe_record(record: dict[str, Any]) -> dict[str, Any]:
 
 def _record_item(record: dict[str, Any]) -> dict[str, str]:
     return {
-        "exam_item": str(record.get("exam_item", "") or "unnamed item"),
+        "exam_item": _exam_item_name(record) or "unnamed item",
         "patient_name": str(record.get("patient_name", "") or ""),
         "patient_id": str(record.get("patient_id", "") or ""),
         "report_no": str(record.get("report_no", "") or ""),
@@ -406,7 +407,11 @@ def _record_item(record: dict[str, Any]) -> dict[str, str]:
 
 
 def _exam_item_name(record: dict[str, Any]) -> str:
-    return str(record.get("exam_item", "") or "").strip()
+    for key in EXAM_ITEM_KEYS:
+        value = str(record.get(key, "") or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _exam_item_names(records: list[dict[str, Any]]) -> list[str]:
@@ -423,7 +428,8 @@ def _matching_exam_index(records: list[dict[str, Any]], device_type: str) -> Opt
     if not target:
         return None
     for index, record in enumerate(records):
-        if _normalize_exam_item(_exam_item_name(record)) == target:
+        candidate = _normalize_exam_item(_exam_item_name(record))
+        if candidate == target or target in candidate:
             return index
     return None
 
@@ -432,7 +438,7 @@ def _group_records_by_exam_item(records: list[dict[str, Any]]) -> list[dict[str,
     seen = set()
     result = []
     for record in records:
-        items = _split_exam_items(str(record.get("exam_item", "") or ""))
+        items = _split_exam_items(_exam_item_name(record))
         if not items:
             items = [""]
         for item in items:

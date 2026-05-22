@@ -13,6 +13,7 @@ from aiohttp import ClientSession, ClientTimeout
 from .config import PatientApiConfig
 
 LOGGER = logging.getLogger(__name__)
+EXAM_ITEM_KEYS = ("exam_item", "exam_item_name", "examItemName", "examItem")
 
 
 def build_patient_sql(scan: str) -> str:
@@ -51,14 +52,26 @@ def records_from_payload(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, dict):
         data = payload.get("data")
         if isinstance(data, list):
-            return [item for item in data if isinstance(item, dict)]
+            return [_normalize_record(item) for item in data if isinstance(item, dict)]
         if isinstance(data, dict):
-            return [data]
+            return [_normalize_record(data)]
         if payload.get("patient_id") or payload.get("patient_name"):
-            return [payload]
+            return [_normalize_record(payload)]
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
+        return [_normalize_record(item) for item in payload if isinstance(item, dict)]
     return []
+
+
+def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(record)
+    if str(normalized.get("exam_item", "") or "").strip():
+        return normalized
+    for key in EXAM_ITEM_KEYS:
+        value = normalized.get(key)
+        if str(value or "").strip():
+            normalized["exam_item"] = str(value).strip()
+            break
+    return normalized
 
 
 def first_record(payload: Any) -> Optional[dict[str, Any]]:
