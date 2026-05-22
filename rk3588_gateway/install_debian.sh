@@ -20,7 +20,7 @@ apt install -y \
   rsync curl nano openssh-client sshpass dosfstools util-linux gpiod \
   fonts-wqy-microhei libjpeg-dev zlib1g-dev libfreetype6-dev
 
-mkdir -p "$APP_DIR" "$DATA_DIR"
+mkdir -p "$APP_DIR" "$DATA_DIR" "$DATA_DIR/device"
 rsync -a --delete \
   --exclude ".git" \
   --exclude ".venv" \

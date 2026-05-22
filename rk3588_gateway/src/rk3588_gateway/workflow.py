@@ -100,32 +100,37 @@ class GatewayWorkflow:
         async with self._interactive_lock:
             self._raise_if_stale(generation)
             items = [_record_item(record) for record in records]
-            auto_input = _should_auto_input(raw_records, records)
+            device_type = self.config.device.type.strip()
+            selected_index = _matching_exam_index(records, device_type)
+            patient_exam_items = _exam_item_names(records)
+            auto_input = selected_index is not None
             LOGGER.info(
-                "scan workflow decision code=%s auto_input=%s api_records=%d grouped_items=%d",
+                "scan workflow decision code=%s device_type=%s auto_input=%s api_records=%d grouped_items=%d patient_items=%s",
                 scan,
+                device_type,
                 auto_input,
                 len(raw_records),
                 len(records),
+                patient_exam_items,
             )
-            if auto_input:
-                index = 0
-            else:
-                self._set_scan_display(
-                    generation,
-                    "select_item",
-                    "select exam item",
-                    "DOWN selects, OK confirms",
-                    scan=scan,
-                    items=items,
-                    selected_index=0,
+            if selected_index is None:
+                self._show_exam_mismatch(scan, generation, patient_exam_items, device_type)
+                self.queue.put(
+                    GatewayEvent(
+                        type="patient.exam_mismatch",
+                        device_id=self.config.device.id,
+                        payload={"code": scan, "device_type": device_type, "exam_items": patient_exam_items},
+                    )
                 )
-                index = await self._wait_selection()
-                self._raise_if_stale(generation)
-                if index < 0 or index >= len(records):
-                    LOGGER.warning("selection index out of range index=%s records=%d", index, len(records))
-                    index = 0
+                return
+            index = selected_index
             record = records[index]
+            selected_exam_item = _exam_item_name(record)
+            other_exam_items = [
+                item
+                for item_index, item in enumerate(patient_exam_items)
+                if item_index != index and item
+            ]
 
             self.queue.put(
                 GatewayEvent(
@@ -151,6 +156,10 @@ class GatewayWorkflow:
                 scan=scan,
                 items=items,
                 selected_index=index,
+                exam_item=selected_exam_item,
+                other_exam_items=other_exam_items,
+                patient_exam_items=patient_exam_items,
+                device_type=device_type,
             )
             self._hid_input_active = True
             self._hid_input_generation = generation
@@ -217,6 +226,11 @@ class GatewayWorkflow:
                 scan=scan,
                 items=items,
                 selected_index=index,
+                exam_item=selected_exam_item,
+                other_exam_items=other_exam_items,
+                patient_exam_items=patient_exam_items,
+                device_type=device_type,
+                return_after_seconds=4,
                 done_at=time.time(),
             )
 
@@ -331,9 +345,10 @@ class GatewayWorkflow:
         return True
 
     def get_display_state(self) -> dict[str, Any]:
-        if self.display_state.get("screen") == "upload_done":
+        if self.display_state.get("screen") in ("upload_done", "exam_mismatch"):
             done_at = float(self.display_state.get("done_at", 0) or 0)
-            if done_at and time.time() - done_at >= 3:
+            return_after = float(self.display_state.get("return_after_seconds", 3) or 3)
+            if done_at and time.time() - done_at >= return_after:
                 self._set_display("wait_scan", "waiting for scan", "scan patient barcode", items=[], selected_index=0, scan="")
         popup = self.display_state.get("popup")
         if isinstance(popup, dict) and float(popup.get("expires_at", 0) or 0) <= time.time():
@@ -357,6 +372,21 @@ class GatewayWorkflow:
     def _show_not_found(self, scan: str, generation: int) -> None:
         self._set_scan_display(generation, "not_found", "未找到申请单", "请核对条码后重试", scan=scan, items=[], selected_index=0)
 
+    def _show_exam_mismatch(self, scan: str, generation: int, patient_exam_items: list[str], device_type: str) -> None:
+        self._set_scan_display(
+            generation,
+            "exam_mismatch",
+            "患者检查项目与设备不符",
+            "未执行自动录入",
+            scan=scan,
+            items=[],
+            selected_index=0,
+            patient_exam_items=patient_exam_items,
+            device_type=device_type,
+            done_at=time.time(),
+            return_after_seconds=4,
+        )
+
 
 def _safe_record(record: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -373,6 +403,29 @@ def _record_item(record: dict[str, Any]) -> dict[str, str]:
         "patient_id": str(record.get("patient_id", "") or ""),
         "report_no": str(record.get("report_no", "") or ""),
     }
+
+
+def _exam_item_name(record: dict[str, Any]) -> str:
+    return str(record.get("exam_item", "") or "").strip()
+
+
+def _exam_item_names(records: list[dict[str, Any]]) -> list[str]:
+    names = []
+    for record in records:
+        name = _exam_item_name(record)
+        if name:
+            names.append(name)
+    return names
+
+
+def _matching_exam_index(records: list[dict[str, Any]], device_type: str) -> Optional[int]:
+    target = _normalize_exam_item(device_type)
+    if not target:
+        return None
+    for index, record in enumerate(records):
+        if _normalize_exam_item(_exam_item_name(record)) == target:
+            return index
+    return None
 
 
 def _group_records_by_exam_item(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -394,20 +447,15 @@ def _group_records_by_exam_item(records: list[dict[str, Any]]) -> list[dict[str,
     return result
 
 
-def _exam_item_count(record: dict[str, Any]) -> int:
-    items = _split_exam_items(str(record.get("exam_item", "") or ""))
-    return len(items) if items else 1
-
-
-def _should_auto_input(raw_records: list[dict[str, Any]], grouped_records: list[dict[str, Any]]) -> bool:
-    return len(raw_records) == 1 and len(grouped_records) == 1 and _exam_item_count(raw_records[0]) == 1
-
-
 def _split_exam_items(value: str) -> list[str]:
     normalized = value
     for separator in ("；", "、", "，", ";", "\n", "\r", "\t", "|", "｜", "/", "／", "\\", "+", "＋"):
         normalized = normalized.replace(separator, ",")
     return [part.strip() for part in normalized.split(",") if part.strip()]
+
+
+def _normalize_exam_item(value: str) -> str:
+    return "".join(str(value or "").split()).strip()
 
 
 def _event_time(created_at: str) -> float:

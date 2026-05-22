@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import signal
+import shutil
 from pathlib import Path
 
 from .api import LocalApi
@@ -39,6 +40,7 @@ async def main_async() -> None:
         level=getattr(logging, config.logging.level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    ensure_device_profile(config)
 
     queue = EventQueue(config.storage.sqlite_path)
     printer = Printer(config.printer)
@@ -79,12 +81,6 @@ async def main_async() -> None:
 
     workflow_tasks = set()
 
-    async def run_scan_workflow(code: str) -> None:
-        try:
-            await workflow.handle_scan(code)
-        except Exception:
-            logging.getLogger(__name__).exception("scan workflow failed code=%s", code)
-
     async def queue_event(event: GatewayEvent) -> None:
         queue.put(event)
         logging.getLogger(__name__).info(
@@ -96,9 +92,10 @@ async def main_async() -> None:
         if event.type == "barcode.scan":
             code = str(event.payload.get("code", ""))
             if code:
-                task = asyncio.create_task(run_scan_workflow(code))
-                workflow_tasks.add(task)
-                task.add_done_callback(workflow_tasks.discard)
+                task = workflow.start_scan(code)
+                if task:
+                    workflow_tasks.add(task)
+                    task.add_done_callback(workflow_tasks.discard)
 
     async def gpio_key_loop() -> None:
         last_values = {}
@@ -140,6 +137,17 @@ async def main_async() -> None:
 
 def main() -> None:
     asyncio.run(main_async())
+
+
+def ensure_device_profile(config) -> None:
+    profile_dir = Path(config.device.profile_dir)
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    (profile_dir / "device_type.txt").write_text(config.device.type, encoding="utf-8")
+    report_info = Path(config.report_upload.report_info_path)
+    report_info.parent.mkdir(parents=True, exist_ok=True)
+    legacy_report_info = Path("/var/lib/rk3568-gateway/ReportInfo.xml")
+    if report_info != legacy_report_info and legacy_report_info.exists() and not report_info.exists():
+        shutil.copy2(legacy_report_info, report_info)
 
 
 if __name__ == "__main__":

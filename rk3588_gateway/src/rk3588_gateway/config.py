@@ -11,6 +11,8 @@ import yaml
 class DeviceConfig:
     id: str
     location: str
+    type: str
+    profile_dir: str
 
 
 @dataclass(frozen=True)
@@ -225,11 +227,16 @@ def load_config(path: Union[str, Path]) -> AppConfig:
     local_api = _section(raw, "local_api")
     storage = _section(raw, "storage")
     logging = _section(raw, "logging")
+    report_info_path = str(report_upload.get("report_info_path", "/var/lib/rk3568-gateway/device/ReportInfo.xml"))
+    if report_info_path == "/var/lib/rk3568-gateway/ReportInfo.xml":
+        report_info_path = "/var/lib/rk3568-gateway/device/ReportInfo.xml"
 
     return AppConfig(
         device=DeviceConfig(
             id=str(device.get("id", "rk3568-gateway")),
             location=str(device.get("location", "")),
+            type=str(device.get("type", "人体成分检查")),
+            profile_dir=str(device.get("profile_dir", "/var/lib/rk3568-gateway/device")),
         ),
         scanner=ScannerConfig(
             enabled=bool(scanner.get("enabled", True)),
@@ -288,7 +295,7 @@ def load_config(path: Union[str, Path]) -> AppConfig:
         report_upload=ReportUploadConfig(
             enabled=bool(report_upload.get("enabled", False)),
             endpoint=str(report_upload.get("endpoint", "")),
-            report_info_path=str(report_upload.get("report_info_path", "/var/lib/rk3568-gateway/ReportInfo.xml")),
+            report_info_path=report_info_path,
             state_dir=str(report_upload.get("state_dir", "/var/lib/rk3568-gateway/report_upload_state")),
             poll_interval_seconds=int(report_upload.get("poll_interval_seconds", 5)),
             timeout_seconds=int(report_upload.get("timeout_seconds", 30)),

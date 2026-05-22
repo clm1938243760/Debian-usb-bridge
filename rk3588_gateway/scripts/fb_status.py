@@ -67,6 +67,13 @@ TEXT = {
     "failed_subtitle": "\u8bf7\u68c0\u67e5\u8fde\u63a5\u72b6\u6001",
     "querying_title": "\u6b63\u5728\u67e5\u8be2",
     "querying_subtitle": "\u8bf7\u7a0d\u5019",
+    "device_type": "\u8bbe\u5907\u9879\u76ee",
+    "patient_items": "\u60a3\u8005\u9879\u76ee",
+    "current_input": "\u6b63\u5728\u5f55\u5165",
+    "other_items": "\u5176\u4ed6\u9879\u76ee",
+    "exam_mismatch": "\u9879\u76ee\u4e0d\u7b26",
+    "exam_mismatch_title": "\u60a3\u8005\u68c0\u67e5\u9879\u76ee\u4e0e\u8bbe\u5907\u4e0d\u7b26",
+    "exam_mismatch_subtitle": "\u672a\u6267\u884c\u81ea\u52a8\u5f55\u5165",
 }
 
 ASSET_PATTERNS = {
@@ -325,9 +332,11 @@ class AssetRenderer:
         if screen == "select_item":
             image = self._select(display)
         elif screen == "inputting":
-            image = self._status_page(TEXT["auto_input"], TEXT["do_not_touch"], TEXT["inputting"], (255, 183, 77))
+            image = self._inputting(display)
         elif screen == "upload_done":
             image = self._status_page(TEXT["input_done"], TEXT["ready_scan"], TEXT["input_done"], (35, 196, 123))
+        elif screen == "exam_mismatch":
+            image = self._exam_mismatch(display)
         elif screen in ("not_found", "query_not_found"):
             image = self._status_page(TEXT["no_order_title"], TEXT["no_order_subtitle"], TEXT["not_found"], (245, 92, 92))
         elif screen in ("querying", "api_querying"):
@@ -447,6 +456,57 @@ class AssetRenderer:
             draw.text((68, y + 8), self._clip(draw, text, self.font_mid, 340), font=self.font_mid, fill=text_fill)
             y += 48
         draw.text((48, 263), TEXT["select_hint"], font=self.font_small, fill=(91, 109, 127, 255))
+        return image.convert("RGB")
+
+    def _inputting(self, display: dict[str, Any]) -> Image.Image:
+        exam_item = str(display.get("exam_item", "") or "")
+        other_items = display.get("other_exam_items") if isinstance(display.get("other_exam_items"), list) else []
+        patient_items = display.get("patient_exam_items") if isinstance(display.get("patient_exam_items"), list) else []
+        lines = []
+        if exam_item:
+            lines.append(f"{TEXT['current_input']}: {exam_item}")
+        if other_items:
+            lines.append(f"{TEXT['other_items']}: {', '.join(str(item) for item in other_items if item)}")
+        elif len(patient_items) > 1:
+            lines.append(f"{TEXT['patient_items']}: {', '.join(str(item) for item in patient_items if item)}")
+        return self._detail_status_page(TEXT["auto_input"], TEXT["do_not_touch"], TEXT["inputting"], (255, 183, 77), lines)
+
+    def _exam_mismatch(self, display: dict[str, Any]) -> Image.Image:
+        device_type = str(display.get("device_type", "") or "")
+        patient_items = display.get("patient_exam_items") if isinstance(display.get("patient_exam_items"), list) else []
+        lines = []
+        if device_type:
+            lines.append(f"{TEXT['device_type']}: {device_type}")
+        if patient_items:
+            lines.append(f"{TEXT['patient_items']}: {', '.join(str(item) for item in patient_items if item)}")
+        return self._detail_status_page(
+            TEXT["exam_mismatch_title"],
+            TEXT["exam_mismatch_subtitle"],
+            TEXT["exam_mismatch"],
+            (245, 92, 92),
+            lines,
+        )
+
+    def _detail_status_page(
+        self,
+        title: str,
+        subtitle: str,
+        tag: str,
+        accent: tuple[int, int, int],
+        lines: list[str],
+    ) -> Image.Image:
+        image = self._background()
+        draw = ImageDraw.Draw(image, "RGBA")
+        self._top_bar(draw, accent, tag)
+        draw.rounded_rectangle((24, 76, 456, 292), radius=22, fill=(255, 255, 255, 238), outline=(*accent, 150), width=2)
+        draw.rectangle((24, 114, 32, 258), fill=(*accent, 255))
+        self._center_text(draw, self._clip(draw, title, load_font(28, bold=True), 380), 100, load_font(28, bold=True), (22, 34, 46, 255))
+        self._center_text(draw, subtitle, 138, self.font_mid, (73, 88, 105, 255))
+        y = 178
+        for line in lines[:3]:
+            clipped = self._clip(draw, str(line), self.font_small, 350)
+            draw.text((56, y), clipped, font=self.font_small, fill=(35, 50, 65, 255))
+            y += 28
         return image.convert("RGB")
 
     def _draw_center_overlay(self, image: Image.Image, title: str, subtitle: str) -> None:

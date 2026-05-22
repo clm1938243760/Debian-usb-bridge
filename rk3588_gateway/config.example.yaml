@@ -1,6 +1,8 @@
 device:
   id: "rk3568-atk-evb1-001"
   location: "workbench"
+  type: "人体成分检查"
+  profile_dir: "/var/lib/rk3568-gateway/device"
 
 scanner:
   enabled: true
@@ -24,7 +26,7 @@ hid_input:
   template_path: "/opt/rk3568_gateway/MarkInfo_SearchTitle_Config_100.json"
   screen_width: 1920
   screen_height: 1080
-  action_delay_ms: 60
+  action_delay_ms: 150
   start_delay_ms: 150
   force_caps_ascii: true
   non_ascii_mode: "powershell"
@@ -52,7 +54,7 @@ report_pdf:
 report_upload:
   enabled: true
   endpoint: "http://192.168.112.139:9061/api/client/uploadOriginalReport"
-  report_info_path: "/var/lib/rk3568-gateway/ReportInfo.xml"
+  report_info_path: "/var/lib/rk3568-gateway/device/ReportInfo.xml"
   state_dir: "/var/lib/rk3568-gateway/report_upload_state"
   poll_interval_seconds: 5
   timeout_seconds: 30
