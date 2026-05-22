@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from .config import AppConfig
 from .events import GatewayEvent
@@ -38,23 +38,56 @@ class GatewayWorkflow:
             "popup": None,
         }
         self._selection_event = None
+        self._active_scan_task = None
+        self._scan_generation = 0
+        self._hid_input_generation = 0
+
+    def start_scan(self, scan: str) -> Optional[asyncio.Task]:
+        if self._hid_input_active:
+            LOGGER.info("ignore scan during hid input code=%s", scan)
+            return None
+        self._scan_generation += 1
+        generation = self._scan_generation
+        current = self._active_scan_task
+        if current and not current.done():
+            LOGGER.info("cancel previous scan workflow for new code=%s", scan)
+            current.cancel()
+        task = asyncio.create_task(self._run_scan(scan, generation))
+        self._active_scan_task = task
+        task.add_done_callback(self._scan_task_done)
+        return task
 
     async def handle_scan(self, scan: str) -> None:
+        task = self.start_scan(scan)
+        if task:
+            await task
+
+    async def _run_scan(self, scan: str, generation: int) -> None:
         scan = scan.strip().upper()
         if len(scan) < 8:
             LOGGER.warning("ignore short scan code=%s", scan)
-            self._set_display("wait_scan", "invalid scan", "scan again", scan=scan, items=[], selected_index=0)
+            self._set_scan_display(generation, "wait_scan", "invalid scan", "scan again", scan=scan, items=[], selected_index=0)
             return
-        if not self._interactive_lock.locked():
-            self._set_display("querying", "querying order", "please wait", scan=scan, items=[], selected_index=0)
+        self._set_scan_display(generation, "querying", "querying order", "please wait", scan=scan, items=[], selected_index=0)
         try:
-            records = _group_records_by_exam_item(await self.patient_api.query_records(scan))
+            raw_records = await self.patient_api.query_records(scan)
+            records = _group_records_by_exam_item(raw_records)
+            LOGGER.info(
+                "scan query result code=%s api_records=%d grouped_items=%d",
+                scan,
+                len(raw_records),
+                len(records),
+            )
+        except asyncio.CancelledError:
+            LOGGER.info("scan workflow cancelled during query code=%s", scan)
+            raise
         except Exception:
             LOGGER.exception("scan query failed code=%s", scan)
+            raw_records = []
             records = []
+        self._raise_if_stale(generation)
         if not records:
-            if not self._interactive_lock.locked():
-                self._show_not_found(scan)
+            self._show_not_found(scan, generation)
             self.queue.put(
                 GatewayEvent(
                     type="patient.query_failed",
@@ -65,11 +98,21 @@ class GatewayWorkflow:
             return
 
         async with self._interactive_lock:
+            self._raise_if_stale(generation)
             items = [_record_item(record) for record in records]
-            if len(records) == 1:
+            auto_input = _should_auto_input(raw_records, records)
+            LOGGER.info(
+                "scan workflow decision code=%s auto_input=%s api_records=%d grouped_items=%d",
+                scan,
+                auto_input,
+                len(raw_records),
+                len(records),
+            )
+            if auto_input:
                 index = 0
             else:
-                self._set_display(
+                self._set_scan_display(
+                    generation,
                     "select_item",
                     "select exam item",
                     "DOWN selects, OK confirms",
@@ -78,6 +121,7 @@ class GatewayWorkflow:
                     selected_index=0,
                 )
                 index = await self._wait_selection()
+                self._raise_if_stale(generation)
                 if index < 0 or index >= len(records):
                     LOGGER.warning("selection index out of range index=%s records=%d", index, len(records))
                     index = 0
@@ -99,7 +143,8 @@ class GatewayWorkflow:
                     payload={"code": scan, "task": task},
                 )
             )
-            self._set_display(
+            self._set_scan_display(
+                generation,
                 "inputting",
                 "auto input",
                 "do not touch keyboard or mouse",
@@ -108,11 +153,16 @@ class GatewayWorkflow:
                 selected_index=index,
             )
             self._hid_input_active = True
+            self._hid_input_generation = generation
             input_ok = False
             try:
                 timeout = self._hid_form_timeout(task)
                 await asyncio.wait_for(self.hid_output.execute_form(task), timeout=timeout)
+                self._raise_if_stale(generation)
                 input_ok = True
+            except asyncio.CancelledError:
+                LOGGER.info("scan workflow cancelled during hid input code=%s", scan)
+                raise
             except asyncio.TimeoutError:
                 LOGGER.error("hid form timeout code=%s timeout=%.1fs", scan, timeout)
                 self.queue.put(
@@ -132,9 +182,12 @@ class GatewayWorkflow:
                     )
                 )
             finally:
-                self._hid_input_active = False
+                if self._hid_input_generation == generation:
+                    self._hid_input_active = False
+                    self._hid_input_generation = 0
             if not input_ok:
-                self._set_display(
+                self._set_scan_display(
+                    generation,
                     "wait_scan",
                     "input failed",
                     "scan again",
@@ -156,7 +209,8 @@ class GatewayWorkflow:
                     payload={"code": scan, "patient": task.get("patient", {})},
                 )
             )
-            self._set_display(
+            self._set_scan_display(
+                generation,
                 "upload_done",
                 "input done",
                 "ready for next scan",
@@ -168,6 +222,23 @@ class GatewayWorkflow:
 
     def is_hid_input_active(self) -> bool:
         return self._hid_input_active
+
+    def _scan_task_done(self, task: asyncio.Task) -> None:
+        if self._active_scan_task is task:
+            self._active_scan_task = None
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            LOGGER.exception("scan workflow task failed")
+
+    def _is_current_scan(self, generation: int) -> bool:
+        return generation == self._scan_generation
+
+    def _raise_if_stale(self, generation: int) -> None:
+        if not self._is_current_scan(generation):
+            raise asyncio.CancelledError()
 
     def _hid_form_timeout(self, task: dict[str, Any]) -> float:
         events = task.get("eventClassList", [])
@@ -279,8 +350,12 @@ class GatewayWorkflow:
     def _set_display(self, screen: str, title: str, message: str, **extra: Any) -> None:
         self.display_state.update({"screen": screen, "title": title, "message": message, **extra})
 
-    def _show_not_found(self, scan: str) -> None:
-        self._set_display("not_found", "no order found", "scan again", scan=scan, items=[], selected_index=0)
+    def _set_scan_display(self, generation: int, screen: str, title: str, message: str, **extra: Any) -> None:
+        if self._is_current_scan(generation):
+            self._set_display(screen, title, message, **extra)
+
+    def _show_not_found(self, scan: str, generation: int) -> None:
+        self._set_scan_display(generation, "not_found", "未找到申请单", "请核对条码后重试", scan=scan, items=[], selected_index=0)
 
 
 def _safe_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -319,8 +394,19 @@ def _group_records_by_exam_item(records: list[dict[str, Any]]) -> list[dict[str,
     return result
 
 
+def _exam_item_count(record: dict[str, Any]) -> int:
+    items = _split_exam_items(str(record.get("exam_item", "") or ""))
+    return len(items) if items else 1
+
+
+def _should_auto_input(raw_records: list[dict[str, Any]], grouped_records: list[dict[str, Any]]) -> bool:
+    return len(raw_records) == 1 and len(grouped_records) == 1 and _exam_item_count(raw_records[0]) == 1
+
+
 def _split_exam_items(value: str) -> list[str]:
-    normalized = value.replace("；", ",").replace("、", ",").replace("，", ",").replace(";", ",")
+    normalized = value
+    for separator in ("；", "、", "，", ";", "\n", "\r", "\t", "|", "｜", "/", "／", "\\", "+", "＋"):
+        normalized = normalized.replace(separator, ",")
     return [part.strip() for part in normalized.split(",") if part.strip()]
 
 

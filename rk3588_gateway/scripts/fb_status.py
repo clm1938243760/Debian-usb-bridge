@@ -426,13 +426,19 @@ class AssetRenderer:
         draw.text((48, 96), f"{TEXT['order']} {scan.upper()}", font=self.font_mid, fill=(33, 48, 64, 255))
 
         y = 138
-        visible_items = items[:3]
+        visible_items = []
+        if items:
+            selected = selected % len(items)
+            visible_items = [
+                items[(selected + offset) % len(items)]
+                for offset in range(min(3, len(items)))
+            ]
         if not visible_items:
             draw.text((68, 170), TEXT["no_selectable_item"], font=self.font_mid, fill=(86, 104, 122, 255))
         for index, item in enumerate(visible_items):
             if not isinstance(item, dict):
                 continue
-            active = index == selected
+            active = index == 0
             row_fill = (*accent, 255) if active else (244, 248, 252, 255)
             text_fill = (255, 255, 255, 255) if active else (35, 50, 65, 255)
             outline = (*accent, 255) if active else (218, 228, 238, 255)

@@ -100,10 +100,13 @@ class PatientApiClient:
             async with ClientSession(timeout=timeout, headers=headers) as session:
                 async with session.post(self.config.endpoint, json=request_body) as resp:
                     text = await resp.text()
-                    self._save_raw(scan, resp.status, text)
+                    raw_path = self._save_raw(scan, resp.status, text)
+                    LOGGER.info("patient api raw response saved: %s", raw_path)
                     if not 200 <= resp.status < 300:
                         LOGGER.warning("patient api http %s: %.300s", resp.status, text)
                         return []
+        except asyncio.CancelledError:
+            raise
         except asyncio.TimeoutError:
             LOGGER.warning("patient api timeout scan=%s endpoint=%s", scan, self.config.endpoint)
             return []
@@ -117,35 +120,20 @@ class PatientApiClient:
             LOGGER.warning("patient api returned non-json: %.300s", text)
             return []
 
-        records = filter_exact_records(records_from_payload(payload), scan)
+        records = records_from_payload(payload)
         if records:
-            record = records[0]
             LOGGER.info(
-                "patient api selected first record patient_id=%s patient_name=%s exam_item=%s",
-                record.get("patient_id", ""),
-                record.get("patient_name", ""),
-                record.get("exam_item", ""),
+                "patient api returned %d record(s) scan=%s",
+                len(records),
+                scan,
             )
         else:
-            LOGGER.warning("patient api returned no usable record")
+            LOGGER.warning("patient api returned no usable record scan=%s", scan)
         return records
 
-    def _save_raw(self, scan: str, status: int, text: str) -> None:
+    def _save_raw(self, scan: str, status: int, text: str) -> Path:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         safe_scan = "".join(ch if ch.isalnum() else "_" for ch in scan)[:80]
         path = self.raw_dir / f"api_{stamp}_{status}_{safe_scan}.json"
         path.write_text(text, encoding="utf-8")
-
-
-def filter_exact_records(records: list[dict[str, Any]], scan: str) -> list[dict[str, Any]]:
-    key = scan.upper().strip()
-    result: list[dict[str, Any]] = []
-    for record in records:
-        values = (
-            str(record.get("patient_id", "") or "").upper(),
-            str(record.get("his_exam_no", "") or "").upper(),
-            str(record.get("report_no", "") or "").upper(),
-        )
-        if key in values:
-            result.append(record)
-    return result
+        return path
