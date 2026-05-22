@@ -18,34 +18,7 @@ EXAM_ITEM_KEYS = ("exam_item", "exam_item_name", "examItemName", "examItem")
 
 def build_patient_sql(scan: str) -> str:
     kw = scan.replace("'", "''")
-    return f"""select
-  z.exam_item_name as exam_item,
-  t.his_exam_no,
-  z.report_no,
-  t.patient_id,
-  t.patient_name,
-  q.name_phonetic,
-  substr(t.patient_name, 0, 2) as xing,
-  substr(t.patient_name, 2, 8) as ming,
-  t.sex,
-  t.age,
-  to_char(t.birthday,'yyyy') as nian,
-  to_char(t.birthday,'mm') as yue,
-  to_char(t.birthday,'dd') as ri,
-  t.birthday
-from exam_master t
-left join exam_item z on t.his_exam_no=z.his_exam_no
-left join patient_info q on t.patient_id=q.patient_id
-where
-  (
-    z.report_no like '%{kw}%'
-    or t.patient_id like '%{kw}%'
-    or t.patient_name like '%{kw}%'
-  )
-  and z.exam_state='20'
-  and req_date>= CURRENT_DATE - INTERVAL '180 days'
-order by t.req_date desc
-limit 20"""
+    return f"""select  z.exam_item_name,t.his_exam_no,z.report_no,t.patient_id,t.patient_name,q.name_phonetic,substr(t.patient_name, 0, 2) as xing, substr(t.patient_name, 2, 8) as ming,t.sex,t.age,to_char(t.birthday,'yyyy') as nian ,to_char(t.birthday,'mm') as yue,to_char(t.birthday,'dd') as ri ,t.birthday   from exam_master t   left join  exam_item z on t.his_exam_no=z.his_exam_no  left join patient_info q on t.patient_id=q.patient_id  where (z.report_no like '%{kw}%' or t.patient_id like '%{kw}%' or t.patient_name like '%{kw}%')  and z.exam_state='20' and req_date>= CURRENT_DATE - INTERVAL '180 days'  order by req_date desc"""
 
 
 def records_from_payload(payload: Any) -> list[dict[str, Any]]:
