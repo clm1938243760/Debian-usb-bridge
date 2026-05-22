@@ -105,7 +105,7 @@ class GatewayWorkflow:
             matching_indices = _matching_exam_indices(records, device_type)
             selected_index = matching_indices[0] if matching_indices else None
             patient_exam_items = _exam_item_names(records)
-            auto_input = len(matching_indices) == 1
+            auto_input = len(records) == 1 and len(matching_indices) == 1
             LOGGER.info(
                 "scan workflow decision code=%s device_type=%s auto_input=%s matching_items=%d api_records=%d grouped_items=%d patient_items=%s",
                 scan,
@@ -127,7 +127,7 @@ class GatewayWorkflow:
                 )
                 return
 
-            if len(matching_indices) > 1:
+            if not auto_input:
                 choice_items = [_record_item(records[index]) for index in matching_indices]
                 self._selection_event = asyncio.Event()
                 self._set_scan_display(
@@ -142,10 +142,11 @@ class GatewayWorkflow:
                     device_type=device_type,
                 )
                 LOGGER.info(
-                    "scan workflow waiting for item choice code=%s device_type=%s choices=%d",
+                    "scan workflow waiting for item choice code=%s device_type=%s choices=%d grouped_items=%d",
                     scan,
                     device_type,
                     len(choice_items),
+                    len(records),
                 )
                 choice = await self._wait_selection()
                 self._raise_if_stale(generation)
