@@ -13,6 +13,9 @@ from .config import HidInputConfig
 
 LOGGER = logging.getLogger(__name__)
 KEY_CAPSLOCK = 0x39
+HID_DEVICE_WAIT_SECONDS = 10.0
+HID_WRITE_TIMEOUT_SECONDS = 3.0
+HID_LED_READ_TIMEOUT_SECONDS = 0.2
 CH9350_KEYBOARD_PREFIX = b"\x57\xab\x01"
 CH9350_MOUSE_PREFIX = b"\x57\xab\x02"
 CH9350_ABS_MOUSE_PREFIX = b"\x57\xab\x04"
@@ -80,9 +83,9 @@ class HidOutput:
         if self.config.keyboard_backend == "ch9350":
             await self._ensure_ch9350()
         else:
-            await self._wait_device(self.config.keyboard_device)
+            await self._wait_hid_device(self.config.keyboard_device)
         if self.config.mouse_backend == "usb_gadget":
-            await self._wait_device(self.config.mouse_device)
+            await self._wait_hid_device(self.config.mouse_device)
         elif self.config.mouse_backend == "ch9350":
             await self._ensure_ch9350()
         try:
@@ -115,6 +118,8 @@ class HidOutput:
             LOGGER.info("hid form done")
         finally:
             self._stop_led_reader()
+            if self.config.keyboard_backend != "ch9350":
+                self._close_usb_keyboard_fd()
 
     async def click(self, x: int, y: int) -> None:
         if self.config.mouse_backend == "ch9350":
@@ -242,6 +247,10 @@ class HidOutput:
         await self._write_keyboard(bytes(8))
 
     def _start_led_reader(self) -> None:
+        if self.config.keyboard_backend != "ch9350":
+            # RK3568 vendor 4.19 can Oops in f_hidg_read if /dev/hidg0 is
+            # read continuously. USB gadget LEDs are sampled on demand instead.
+            return
         if self._led_task and not self._led_task.done():
             return
         self._led_task = asyncio.create_task(self._led_reader_loop())
@@ -254,27 +263,6 @@ class HidOutput:
         if self.config.keyboard_backend == "ch9350":
             await self._ch9350_led_reader_loop()
             return
-        while True:
-            try:
-                await self._ensure_usb_keyboard_fd()
-                LOGGER.info("keyboard led reader start")
-                while True:
-                    data = await to_thread(self._read_usb_keyboard_led)
-                    if data:
-                        self._led_state = data[0]
-                        LOGGER.info(
-                            "keyboard led state=0x%02x caps=%s",
-                            data[0],
-                            "on" if data[0] & 2 else "off",
-                        )
-                    else:
-                        await asyncio.sleep(0.05)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                LOGGER.exception("keyboard led reader failed")
-                self._close_usb_keyboard_fd()
-                await asyncio.sleep(1)
 
     async def _ch9350_led_reader_loop(self) -> None:
         while True:
@@ -331,7 +319,12 @@ class HidOutput:
 
     async def _wait_caps(self, timeout: float = 0.5) -> Optional[bool]:
         end = asyncio.get_running_loop().time() + timeout
+        state = self._get_caps()
+        if state is not None:
+            return state
         while asyncio.get_running_loop().time() < end:
+            if self.config.keyboard_backend != "ch9350":
+                await self._refresh_usb_keyboard_led()
             state = self._get_caps()
             if state is not None:
                 return state
@@ -342,10 +335,14 @@ class HidOutput:
         state = await self._wait_caps()
         if state is target:
             return
+        if self.config.keyboard_backend != "ch9350":
+            self._led_state = None
         await self._press_key(0, KEY_CAPSLOCK)
         await asyncio.sleep(0.2)
         state = await self._wait_caps()
         if state is not None and state is not target:
+            if self.config.keyboard_backend != "ch9350":
+                self._led_state = None
             await self._press_key(0, KEY_CAPSLOCK)
             await asyncio.sleep(0.2)
 
@@ -357,26 +354,36 @@ class HidOutput:
 
     async def _write_mouse(self, button: int, ax: int, ay: int) -> None:
         report = bytes([button, ax & 0xFF, (ax >> 8) & 0xFF, ay & 0xFF, (ay >> 8) & 0xFF])
-        await to_thread(self._write_file, self.config.mouse_device, report)
+        await asyncio.wait_for(
+            to_thread(self._write_hidg_report, self.config.mouse_device, report),
+            timeout=HID_WRITE_TIMEOUT_SECONDS,
+        )
 
-    def _write_file(self, path: str, data: bytes) -> None:
-        with open(path, "wb", buffering=0) as handle:
-            handle.write(data)
+    def _write_hidg_report(self, path: str, data: bytes) -> None:
+        fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
 
     async def _ensure_usb_keyboard_fd(self) -> None:
         if self._usb_keyboard_fd is not None:
             return
-        await self._wait_device(self.config.keyboard_device)
+        await self._wait_hid_device(self.config.keyboard_device)
         await to_thread(self._open_usb_keyboard_fd)
 
     def _open_usb_keyboard_fd(self) -> None:
         with self._usb_keyboard_lock:
             if self._usb_keyboard_fd is None:
-                self._usb_keyboard_fd = os.open(self.config.keyboard_device, os.O_RDWR | os.O_NONBLOCK)
-                LOGGER.info("usb keyboard gadget opened rw: %s", self.config.keyboard_device)
+                self._usb_keyboard_fd = os.open(self.config.keyboard_device, os.O_WRONLY | os.O_NONBLOCK)
+                LOGGER.info("usb keyboard gadget opened write-only: %s", self.config.keyboard_device)
 
     def _close_usb_keyboard_fd(self) -> None:
-        with self._usb_keyboard_lock:
+        if not self._usb_keyboard_lock.acquire(blocking=False):
+            self._usb_keyboard_fd = None
+            LOGGER.warning("usb keyboard fd close skipped because hid write lock is busy")
+            return
+        try:
             fd = self._usb_keyboard_fd
             self._usb_keyboard_fd = None
             if fd is not None:
@@ -384,16 +391,24 @@ class HidOutput:
                     os.close(fd)
                 except OSError:
                     pass
+        finally:
+            self._usb_keyboard_lock.release()
 
     async def _write_usb_keyboard(self, report: bytes) -> None:
         await self._ensure_usb_keyboard_fd()
         try:
-            await to_thread(self._write_usb_keyboard_once, report)
+            await asyncio.wait_for(
+                to_thread(self._write_usb_keyboard_once, report),
+                timeout=HID_WRITE_TIMEOUT_SECONDS,
+            )
         except OSError:
             LOGGER.exception("usb keyboard write failed, reopening")
             self._close_usb_keyboard_fd()
             await self._ensure_usb_keyboard_fd()
-            await to_thread(self._write_usb_keyboard_once, report)
+            await asyncio.wait_for(
+                to_thread(self._write_usb_keyboard_once, report),
+                timeout=HID_WRITE_TIMEOUT_SECONDS,
+            )
 
     def _write_usb_keyboard_once(self, report: bytes) -> None:
         with self._usb_keyboard_lock:
@@ -401,14 +416,32 @@ class HidOutput:
                 raise FileNotFoundError(self.config.keyboard_device)
             os.write(self._usb_keyboard_fd, report)
 
-    def _read_usb_keyboard_led(self) -> bytes:
+    async def _refresh_usb_keyboard_led(self) -> None:
+        try:
+            data = await asyncio.wait_for(
+                to_thread(self._read_usb_keyboard_led_once),
+                timeout=HID_LED_READ_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, OSError):
+            return
+        if not data:
+            return
+        self._led_state = data[0]
+        LOGGER.info(
+            "keyboard led state=0x%02x caps=%s",
+            data[0],
+            "on" if data[0] & 2 else "off",
+        )
+
+    def _read_usb_keyboard_led_once(self) -> bytes:
         with self._usb_keyboard_lock:
-            if self._usb_keyboard_fd is None:
-                raise FileNotFoundError(self.config.keyboard_device)
+            fd = os.open(self.config.keyboard_device, os.O_RDONLY | os.O_NONBLOCK)
             try:
-                return os.read(self._usb_keyboard_fd, 8)
+                return os.read(fd, 8)
             except BlockingIOError:
                 return b""
+            finally:
+                os.close(fd)
 
     async def _ensure_ch9350(self) -> None:
         if self._ch9350_fd is not None:
@@ -423,6 +456,9 @@ class HidOutput:
             os.write(fd, bytes([0x57, 0xAB, 0x40, state & 0xFF]))
             LOGGER.info("ch9350 set state%d frame sent", state)
             await asyncio.sleep(0.2)
+
+    async def _wait_hid_device(self, path: str) -> None:
+        await asyncio.wait_for(self._wait_device(path), timeout=HID_DEVICE_WAIT_SECONDS)
 
     def _configure_ch9350_serial(self) -> None:
         subprocess.run(

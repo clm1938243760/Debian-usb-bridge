@@ -14,6 +14,8 @@ from .patient_api import PatientApiClient
 from .queue import EventQueue
 
 LOGGER = logging.getLogger(__name__)
+HID_FORM_MIN_TIMEOUT_SECONDS = 30.0
+HID_FORM_MAX_TIMEOUT_SECONDS = 120.0
 
 
 class GatewayWorkflow:
@@ -52,7 +54,7 @@ class GatewayWorkflow:
             records = []
         if not records:
             if not self._interactive_lock.locked():
-                self._set_display("wait_scan", "no order found", "scan again", scan=scan, items=[], selected_index=0)
+                self._show_not_found(scan)
             self.queue.put(
                 GatewayEvent(
                     type="patient.query_failed",
@@ -64,15 +66,21 @@ class GatewayWorkflow:
 
         async with self._interactive_lock:
             items = [_record_item(record) for record in records]
-            self._set_display(
-                "select_item",
-                "select exam item",
-                "DOWN selects, OK confirms",
-                scan=scan,
-                items=items,
-                selected_index=0,
-            )
-            index = await self._wait_selection()
+            if len(records) == 1:
+                index = 0
+            else:
+                self._set_display(
+                    "select_item",
+                    "select exam item",
+                    "DOWN selects, OK confirms",
+                    scan=scan,
+                    items=items,
+                    selected_index=0,
+                )
+                index = await self._wait_selection()
+                if index < 0 or index >= len(records):
+                    LOGGER.warning("selection index out of range index=%s records=%d", index, len(records))
+                    index = 0
             record = records[index]
 
             self.queue.put(
@@ -100,10 +108,47 @@ class GatewayWorkflow:
                 selected_index=index,
             )
             self._hid_input_active = True
+            input_ok = False
             try:
-                await self.hid_output.execute_form(task)
+                timeout = self._hid_form_timeout(task)
+                await asyncio.wait_for(self.hid_output.execute_form(task), timeout=timeout)
+                input_ok = True
+            except asyncio.TimeoutError:
+                LOGGER.error("hid form timeout code=%s timeout=%.1fs", scan, timeout)
+                self.queue.put(
+                    GatewayEvent(
+                        type="hid.form_failed",
+                        device_id=self.config.device.id,
+                        payload={"code": scan, "error": "hid input timeout", "timeout_seconds": timeout},
+                    )
+                )
+            except Exception as exc:
+                LOGGER.exception("hid form failed code=%s", scan)
+                self.queue.put(
+                    GatewayEvent(
+                        type="hid.form_failed",
+                        device_id=self.config.device.id,
+                        payload={"code": scan, "error": str(exc)},
+                    )
+                )
             finally:
                 self._hid_input_active = False
+            if not input_ok:
+                self._set_display(
+                    "wait_scan",
+                    "input failed",
+                    "scan again",
+                    scan="",
+                    items=[],
+                    selected_index=0,
+                    popup={
+                        "title": "录入失败",
+                        "message": "请重新扫码",
+                        "source": "hid.form_failed",
+                        "expires_at": time.time() + 2.0,
+                    },
+                )
+                return
             self.queue.put(
                 GatewayEvent(
                     type="hid.form_done",
@@ -123,6 +168,15 @@ class GatewayWorkflow:
 
     def is_hid_input_active(self) -> bool:
         return self._hid_input_active
+
+    def _hid_form_timeout(self, task: dict[str, Any]) -> float:
+        events = task.get("eventClassList", [])
+        event_count = len(events) if isinstance(events, list) else 0
+        start_delay = self.config.hid_input.start_delay_ms / 1000
+        action_delay = self.config.hid_input.action_delay_ms / 1000
+        paste_wait = self.config.hid_input.powershell_wait_ms / 1000
+        timeout = start_delay + event_count * max(action_delay + paste_wait + 0.8, 2.0) + 8.0
+        return max(HID_FORM_MIN_TIMEOUT_SECONDS, min(HID_FORM_MAX_TIMEOUT_SECONDS, timeout))
 
     def handle_key(self, key: str) -> None:
         if self.display_state.get("screen") != "select_item":
@@ -224,6 +278,9 @@ class GatewayWorkflow:
 
     def _set_display(self, screen: str, title: str, message: str, **extra: Any) -> None:
         self.display_state.update({"screen": screen, "title": title, "message": message, **extra})
+
+    def _show_not_found(self, scan: str) -> None:
+        self._set_display("not_found", "no order found", "scan again", scan=scan, items=[], selected_index=0)
 
 
 def _safe_record(record: dict[str, Any]) -> dict[str, Any]:
