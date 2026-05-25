@@ -1,86 +1,78 @@
 {
-  "title": "患者数据库",
-  "windowTitleLocation": "0, 0, 996, 689",
+  "title": "新建患者",
+  "windowTitleLocation": "0, 0, 436, 489",
   "eventClassList": [
     {
       "index": 0,
       "clickType": 0,
       "text": null,
-      "x": 221,
-      "y": 331,
-      "clickLogStr": "在 (221,331) 位置,点击了鼠标左键"
+      "x": 243,
+      "y": 82,
+      "clickLogStr": "在 (243,82) 位置,点击了鼠标左键"
     },
     {
       "index": 1,
       "clickType": 1,
       "text": "patient_id",
-      "x": 221,
-      "y": 331,
-      "clickLogStr": "在 (221,331) 位置,发送了字段"
+      "x": 243,
+      "y": 82,
+      "clickLogStr": "在 (243,82) 位置,发送了字段"
     },
     {
       "index": 2,
       "clickType": 0,
       "text": null,
-      "x": 241,
-      "y": 367,
-      "clickLogStr": "在 (241,367) 位置,点击了鼠标左键"
+      "x": 219,
+      "y": 149,
+      "clickLogStr": "在 (219,149) 位置,点击了鼠标左键"
     },
     {
       "index": 3,
       "clickType": 1,
       "text": "patient_name",
-      "x": 241,
-      "y": 367,
-      "clickLogStr": "在 (241,367) 位置,发送了字段"
+      "x": 219,
+      "y": 149,
+      "clickLogStr": "在 (219,149) 位置,发送了字段"
     },
     {
       "index": 4,
       "clickType": 0,
       "text": null,
-      "x": 236,
-      "y": 406,
-      "clickLogStr": "在 (236,406) 位置,点击了鼠标左键"
+      "x": 210,
+      "y": 212,
+      "clickLogStr": "在 (210,212) 位置,点击了鼠标左键"
     },
     {
       "index": 5,
-      "clickType": 1,
-      "text": "patient_name",
-      "x": 236,
-      "y": 406,
-      "clickLogStr": "在 (236,406) 位置,发送了字段"
+      "clickType": 7,
+      "text": "性别:男",
+      "x": 209,
+      "y": 238,
+      "clickLogStr": "在 (209,238) 位置,单选按钮开始"
     },
     {
       "index": 6,
-      "clickType": 0,
-      "text": null,
-      "x": 216,
-      "y": 446,
-      "clickLogStr": "在 (216,446) 位置,点击了鼠标左键"
+      "clickType": 7,
+      "text": "性别:女",
+      "x": 206,
+      "y": 254,
+      "clickLogStr": "在 (206,254) 位置,单选按钮开始"
     },
     {
       "index": 7,
-      "clickType": 1,
-      "text": "birthday",
-      "x": 216,
-      "y": 446,
-      "clickLogStr": "在 (216,446) 位置,发送了字段"
+      "clickType": 0,
+      "text": null,
+      "x": 199,
+      "y": 286,
+      "clickLogStr": "在 (199,286) 位置,点击了鼠标左键"
     },
     {
       "index": 8,
-      "clickType": 7,
-      "text": "性别:男",
-      "x": 106,
-      "y": 469,
-      "clickLogStr": "在 (106,469) 位置,单选按钮开始"
-    },
-    {
-      "index": 9,
-      "clickType": 7,
-      "text": "性别:女",
-      "x": 153,
-      "y": 472,
-      "clickLogStr": "在 (153,472) 位置,单选按钮开始"
+      "clickType": 1,
+      "text": "age",
+      "x": 199,
+      "y": 286,
+      "clickLogStr": "在 (199,286) 位置,发送了字段"
     }
   ]
 }

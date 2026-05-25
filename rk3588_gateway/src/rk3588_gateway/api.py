@@ -105,9 +105,9 @@ class LocalApi:
         self.queue.put(event)
         if self.workflow:
             try:
-                await self.workflow.handle_scan(code)
+                self.workflow.start_scan(code)
             except Exception as exc:
-                LOGGER.exception("scan workflow failed code=%s", code)
+                LOGGER.exception("scan workflow start failed code=%s", code)
                 return web.json_response({"ok": False, "id": event.id, "error": str(exc)}, status=500)
         return web.json_response({"ok": True, "id": event.id})
 
