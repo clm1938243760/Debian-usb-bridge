@@ -42,7 +42,7 @@ where
     or t.patient_id like '%{kw}%'
     or t.patient_name like '%{kw}%'
   )
-  and z.exam_state in ('10', '20')
+  and z.exam_state in ('10', '20', '30', '40')
   and t.req_date>= CURRENT_DATE - INTERVAL '180 days'
 order by t.req_date desc
 limit 20"""
