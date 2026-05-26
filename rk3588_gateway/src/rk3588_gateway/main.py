@@ -53,6 +53,16 @@ async def main_async() -> None:
     uploader = Uploader(config.uploader, queue)
     local_api = LocalApi(config, queue, printer, gpio)
     workflow = GatewayWorkflow(config, queue)
+
+    def before_gadget_unbind() -> bool:
+        hid_closed = workflow.hid_output.close_usb_gadget_fds("before gadget unbind")
+        print_closed = print_capture.pause_for_gadget_unbind()
+        return hid_closed and print_closed
+
+    def after_gadget_rebind() -> None:
+        workflow.hid_output.close_usb_gadget_fds("after gadget rebind")
+        print_capture.resume_after_gadget_rebind()
+
     msc_monitor = MscMonitor(
         config.msc,
         queue,
@@ -60,8 +70,8 @@ async def main_async() -> None:
         report_pdf,
         None,
         workflow.is_hid_input_active,
-        print_capture.pause_for_gadget_unbind,
-        print_capture.resume_after_gadget_rebind,
+        before_gadget_unbind,
+        after_gadget_rebind,
     )
     local_api.workflow = workflow
 

@@ -126,6 +126,8 @@ class HidOutput:
             LOGGER.info("hid form done")
         finally:
             self._stop_led_reader()
+            if self.config.keyboard_backend == "usb_gadget" or self.config.mouse_backend == "usb_gadget":
+                await to_thread(self.close_usb_gadget_fds, "after hid form")
 
     async def click(self, x: int, y: int) -> None:
         if self.config.mouse_backend == "ch9350":
@@ -386,11 +388,10 @@ class HidOutput:
                 self._usb_keyboard_fd = os.open(self.config.keyboard_device, os.O_RDWR | os.O_NONBLOCK)
                 LOGGER.info("usb keyboard gadget opened read-write: %s", self.config.keyboard_device)
 
-    def _close_usb_keyboard_fd(self) -> None:
-        if not self._usb_keyboard_lock.acquire(blocking=False):
-            self._usb_keyboard_fd = None
-            LOGGER.warning("usb keyboard fd close skipped because hid write lock is busy")
-            return
+    def _close_usb_keyboard_fd(self, timeout_seconds: float = 2.0) -> bool:
+        if not self._usb_keyboard_lock.acquire(timeout=timeout_seconds):
+            LOGGER.warning("usb keyboard fd close timeout because hid write lock is busy")
+            return False
         try:
             fd = self._usb_keyboard_fd
             self._usb_keyboard_fd = None
@@ -399,8 +400,42 @@ class HidOutput:
                     os.close(fd)
                 except OSError:
                     pass
+            return True
         finally:
             self._usb_keyboard_lock.release()
+
+    def _close_usb_mouse_fd(self, timeout_seconds: float = 2.0) -> bool:
+        if not self._usb_mouse_lock.acquire(timeout=timeout_seconds):
+            LOGGER.warning("usb mouse fd close timeout because hid write lock is busy")
+            return False
+        try:
+            fd = self._usb_mouse_fd
+            self._usb_mouse_fd = None
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            return True
+        finally:
+            self._usb_mouse_lock.release()
+
+    def close_usb_gadget_fds(self, reason: str = "") -> bool:
+        keyboard_open = self._usb_keyboard_fd is not None
+        mouse_open = self._usb_mouse_fd is not None
+        keyboard_closed = self._close_usb_keyboard_fd()
+        mouse_closed = self._close_usb_mouse_fd()
+        self._led_state = None
+        if keyboard_open or mouse_open:
+            LOGGER.info(
+                "hid usb gadget fds close result reason=%s keyboard_open=%s mouse_open=%s keyboard_closed=%s mouse_closed=%s",
+                reason or "unspecified",
+                keyboard_open,
+                mouse_open,
+                keyboard_closed,
+                mouse_closed,
+            )
+        return keyboard_closed and mouse_closed
 
     async def _write_usb_keyboard(self, report: bytes) -> None:
         await self._ensure_usb_keyboard_fd()
