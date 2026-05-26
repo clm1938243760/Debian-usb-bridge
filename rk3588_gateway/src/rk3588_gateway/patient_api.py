@@ -19,7 +19,7 @@ EXAM_ITEM_KEYS = ("exam_item", "exam_item_name", "examItemName", "examItem")
 def build_patient_sql(scan: str) -> str:
     kw = scan.replace("'", "''")
     return f"""select
-  z.exam_item_name as exam_item,
+  t.exam_item as exam_item,
   t.his_exam_no,
   z.report_no,
   t.patient_id,

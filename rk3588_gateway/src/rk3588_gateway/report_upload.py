@@ -291,8 +291,14 @@ def _response_is_success(status: int, text: str) -> Tuple[bool, str]:
         return False, "status=%s response=%s" % (status, text[:500])
 
     data = payload.get("data")
-    if isinstance(data, dict) and "code" in data and str(data.get("code", "")) != "100":
-        return False, "status=%s response=%s" % (status, text[:500])
+    if isinstance(data, dict) and "code" in data:
+        data_code = str(data.get("code", "")).upper()
+        if data_code in ("100", "SUCCESS"):
+            return True, ""
+        if data_code in ("201", "203", "205"):
+            return False, "status=%s response=%s" % (status, text[:500])
+        if data_code in ("202", "204", "FAIL", "FAILED", "ERROR"):
+            return False, "status=%s response=%s" % (status, text[:500])
 
     if success is True or code == "SUCCESS":
         return True, ""

@@ -375,7 +375,7 @@ class GatewayWorkflow:
         return True
 
     def get_display_state(self) -> dict[str, Any]:
-        if self.display_state.get("screen") in ("upload_done", "exam_mismatch"):
+        if self.display_state.get("screen") in ("upload_done", "exam_mismatch", "not_found"):
             done_at = float(self.display_state.get("done_at", 0) or 0)
             return_after = float(self.display_state.get("return_after_seconds", 3) or 3)
             if done_at and time.time() - done_at >= return_after:
@@ -403,7 +403,17 @@ class GatewayWorkflow:
             self._set_display(screen, title, message, **extra)
 
     def _show_not_found(self, scan: str, generation: int) -> None:
-        self._set_scan_display(generation, "not_found", "未找到申请单", "请核对条码后重试", scan=scan, items=[], selected_index=0)
+        self._set_scan_display(
+            generation,
+            "not_found",
+            "未找到申请单",
+            "请核对条码后重试",
+            scan=scan,
+            items=[],
+            selected_index=0,
+            done_at=time.time(),
+            return_after_seconds=4,
+        )
 
     def _show_exam_mismatch(self, scan: str, generation: int, patient_exam_items: list[str], device_type: str) -> None:
         self._set_scan_display(
@@ -479,13 +489,16 @@ def _group_records_by_exam_item(records: list[dict[str, Any]]) -> list[dict[str,
         items = _split_exam_items(_exam_item_name(record))
         if not items:
             items = [""]
+        multi_item_record = len(items) > 1
         for item in items:
-            key = "%s|%s|%s|%s" % (
+            key_parts = [
                 item,
                 record.get("patient_id", ""),
                 record.get("his_exam_no", ""),
-                record.get("report_no", ""),
-            )
+            ]
+            if not multi_item_record:
+                key_parts.append(record.get("report_no", ""))
+            key = "|".join(str(part) for part in key_parts)
             if key in seen:
                 continue
             seen.add(key)
