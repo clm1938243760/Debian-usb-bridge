@@ -32,6 +32,27 @@ hid_input:
   non_ascii_mode: "powershell"
   powershell_wait_ms: 1800
 
+vision:
+  enabled: true
+  device: "/dev/video9"
+  capture_format: "mjpg"
+  capture_width: 1920
+  capture_height: 1080
+  capture_framerate: 30
+  capture_frames: 30
+  capture_io_mode: 2
+  workdir: "/tmp/rk3568-vision-flow"
+  icon_endpoint: "http://192.168.20.163:5002/icon/locate"
+  window_endpoint: "http://192.168.20.163:5002/window/detect"
+  software: "人体成分分析仪"
+  wait_after_open: 2.5
+  wait_after_action: 1.0
+  wait_after_no_detection: 5.0
+  wait_after_start: 3.0
+  analysis_wait: 1.5
+  max_runtime: 300.0
+  timeout_seconds: 15.0
+
 printer:
   enabled: true
   command: "lp"

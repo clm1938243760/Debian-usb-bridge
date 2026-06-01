@@ -12,6 +12,7 @@ from .form import build_form_task
 from .hid_output import HidOutput
 from .patient_api import PatientApiClient
 from .queue import EventQueue
+from .vision_flow import VisionFlow
 
 LOGGER = logging.getLogger(__name__)
 HID_FORM_MIN_TIMEOUT_SECONDS = 30.0
@@ -25,6 +26,7 @@ class GatewayWorkflow:
         self.queue = queue
         self.patient_api = PatientApiClient(config.patient_api)
         self.hid_output = HidOutput(config.hid_input)
+        self.vision_flow = VisionFlow(config.vision, self.hid_output) if config.vision.enabled else None
         self._interactive_lock = asyncio.Lock()
         self._hid_input_active = False
         self._started_at = time.time()
@@ -195,8 +197,8 @@ class GatewayWorkflow:
             self._hid_input_generation = generation
             input_ok = False
             try:
-                timeout = self._hid_form_timeout(task)
-                await asyncio.wait_for(self.hid_output.execute_form(task), timeout=timeout)
+                timeout = self._input_timeout(task)
+                await asyncio.wait_for(self._execute_input_task(task), timeout=timeout)
                 self._raise_if_stale(generation)
                 input_ok = True
             except asyncio.CancelledError:
@@ -292,6 +294,19 @@ class GatewayWorkflow:
         paste_wait = self.config.hid_input.powershell_wait_ms / 1000
         timeout = start_delay + event_count * max(action_delay + paste_wait + 0.8, 2.0) + 8.0
         return max(HID_FORM_MIN_TIMEOUT_SECONDS, min(HID_FORM_MAX_TIMEOUT_SECONDS, timeout))
+
+    def _input_timeout(self, task: dict[str, Any]) -> Optional[float]:
+        if self.vision_flow is None:
+            return self._hid_form_timeout(task)
+        if self.config.vision.max_runtime <= 0:
+            return None
+        return self.config.vision.max_runtime + self._hid_form_timeout(task) + 5.0
+
+    async def _execute_input_task(self, task: dict[str, Any]) -> str:
+        if self.vision_flow is not None:
+            return await self.vision_flow.run_until_form_done(task)
+        await self.hid_output.execute_form(task)
+        return "form_done"
 
     def handle_key(self, key: str) -> None:
         if self.display_state.get("screen") != "select_item":

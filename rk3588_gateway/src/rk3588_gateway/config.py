@@ -57,6 +57,29 @@ class HidInputConfig:
 
 
 @dataclass(frozen=True)
+class VisionConfig:
+    enabled: bool
+    device: str
+    capture_format: str
+    capture_width: int
+    capture_height: int
+    capture_framerate: int
+    capture_frames: int
+    capture_io_mode: int
+    workdir: str
+    icon_endpoint: str
+    window_endpoint: str
+    software: str
+    wait_after_open: float
+    wait_after_action: float
+    wait_after_no_detection: float
+    wait_after_start: float
+    analysis_wait: float
+    max_runtime: float
+    timeout_seconds: float
+
+
+@dataclass(frozen=True)
 class PrinterConfig:
     enabled: bool
     command: str
@@ -178,6 +201,7 @@ class AppConfig:
     scanner: ScannerConfig
     patient_api: PatientApiConfig
     hid_input: HidInputConfig
+    vision: VisionConfig
     printer: PrinterConfig
     print_capture: PrintCaptureConfig
     report_pdf: ReportPdfConfig
@@ -208,6 +232,9 @@ def load_config(path: Union[str, Path]) -> AppConfig:
     scanner = _section(raw, "scanner")
     patient_api = _section(raw, "patient_api")
     hid_input = _section(raw, "hid_input")
+    vision = raw.get("vision", {})
+    if not isinstance(vision, dict):
+        raise ValueError("invalid config section: vision")
     printer = _section(raw, "printer")
     print_capture = _section(raw, "print_capture")
     report_pdf = raw.get("report_pdf", {})
@@ -272,6 +299,27 @@ def load_config(path: Union[str, Path]) -> AppConfig:
             force_caps_ascii=bool(hid_input.get("force_caps_ascii", True)),
             non_ascii_mode=str(hid_input.get("non_ascii_mode", "powershell")),
             powershell_wait_ms=int(hid_input.get("powershell_wait_ms", 2500)),
+        ),
+        vision=VisionConfig(
+            enabled=bool(vision.get("enabled", False)),
+            device=str(vision.get("device", "/dev/video9")),
+            capture_format=str(vision.get("capture_format", "mjpg")),
+            capture_width=int(vision.get("capture_width", 1920)),
+            capture_height=int(vision.get("capture_height", 1080)),
+            capture_framerate=int(vision.get("capture_framerate", 30)),
+            capture_frames=int(vision.get("capture_frames", 30)),
+            capture_io_mode=int(vision.get("capture_io_mode", 2)),
+            workdir=str(vision.get("workdir", "/tmp/rk3568-vision-flow")),
+            icon_endpoint=str(vision.get("icon_endpoint", "http://192.168.20.163:5002/icon/locate")),
+            window_endpoint=str(vision.get("window_endpoint", "http://192.168.20.163:5002/window/detect")),
+            software=str(vision.get("software", "人体成分分析仪")),
+            wait_after_open=float(vision.get("wait_after_open", 2.5)),
+            wait_after_action=float(vision.get("wait_after_action", 1.0)),
+            wait_after_no_detection=float(vision.get("wait_after_no_detection", 5.0)),
+            wait_after_start=float(vision.get("wait_after_start", 3.0)),
+            analysis_wait=float(vision.get("analysis_wait", 1.5)),
+            max_runtime=float(vision.get("max_runtime", 300.0)),
+            timeout_seconds=float(vision.get("timeout_seconds", 15.0)),
         ),
         printer=PrinterConfig(
             enabled=bool(printer.get("enabled", True)),
