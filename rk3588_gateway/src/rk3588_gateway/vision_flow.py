@@ -25,10 +25,17 @@ CHECK_DONE_TEXT = "检查完成"
 ANALYSIS_TEXT = "数据分析"
 ANALYSIS_NO_RESPONSE_WAIT_SECONDS = 1.5
 LOGIN_TEXT = "登录"
+LOGIN_TITLE_TEXT = "用户登录"
+USERNAME_TEXT = "用户名"
+PASSWORD_TEXT = "密码"
 NEW_PATIENT_TEXT = "新建患者"
 UNSELECTED_PATIENT_TEXT = "未选择患者"
 READY_TEXT = "就绪"
 PATIENT_ID_TEXT = "患者号"
+PATIENT_NAME_TEXT = "姓名"
+PATIENT_SEX_TEXT = "性别"
+PATIENT_AGE_TEXT = "年龄"
+ORDER_DEPARTMENT_TEXT = "开单科室"
 REPORT_GENERATED_TEXT = "检查报告已生成"
 LINEAR_POLL_SECONDS = 0.5
 
@@ -269,17 +276,36 @@ def has_no_detected_window(response: dict[str, Any]) -> bool:
 
 
 def is_login_window(response: dict[str, Any]) -> bool:
-    return has_label(response, "0") and ocr_contains(response, LOGIN_TEXT)
+    return (
+        find_ocr_center(response, LOGIN_TEXT) is not None
+        and (
+            ocr_contains(response, LOGIN_TITLE_TEXT)
+            or (ocr_contains(response, USERNAME_TEXT) and ocr_contains(response, PASSWORD_TEXT))
+        )
+    )
 
 
 def is_new_patient_window(response: dict[str, Any]) -> bool:
-    return has_label(response, "2")
+    return (
+        has_label(response, "2")
+        or (
+            ocr_contains(response, ORDER_DEPARTMENT_TEXT)
+            and ocr_contains(response, PATIENT_ID_TEXT)
+            and confirm_button_target(response) is not None
+        )
+        or (
+            ocr_contains(response, NEW_PATIENT_TEXT)
+            and ocr_contains(response, PATIENT_ID_TEXT)
+            and ocr_contains(response, PATIENT_NAME_TEXT)
+            and (ocr_contains(response, PATIENT_SEX_TEXT) or ocr_contains(response, PATIENT_AGE_TEXT))
+            and confirm_button_target(response) is not None
+        )
+    )
 
 
 def is_ready_to_create_patient(response: dict[str, Any]) -> bool:
     return (
-        has_label(response, "1")
-        and ocr_contains(response, UNSELECTED_PATIENT_TEXT)
+        ocr_contains(response, UNSELECTED_PATIENT_TEXT)
         and ocr_contains(response, READY_TEXT)
         and find_ocr_center(response, NEW_PATIENT_TEXT) is not None
     )
@@ -287,8 +313,7 @@ def is_ready_to_create_patient(response: dict[str, Any]) -> bool:
 
 def is_ready_to_start_check(response: dict[str, Any]) -> bool:
     return (
-        has_label(response, "1")
-        and ocr_contains(response, PATIENT_ID_TEXT)
+        ocr_contains(response, PATIENT_ID_TEXT)
         and ocr_contains(response, READY_TEXT)
         and find_ocr_center(response, START_CHECK_TEXT) is not None
     )
@@ -302,7 +327,7 @@ def is_check_complete(response: dict[str, Any]) -> bool:
 
 
 def is_pdf_report_prompt(response: dict[str, Any]) -> bool:
-    return has_label(response, "4") and ocr_contains(response, PDF_REPORT_PROMPT_TEXT)
+    return ocr_contains(response, PDF_REPORT_PROMPT_TEXT)
 
 
 def confirm_button_target(response: dict[str, Any]) -> str | None:
@@ -342,16 +367,21 @@ def dialog_button_target(response: dict[str, Any], *labels: str) -> str | None:
 
 
 def decide_action(response: dict[str, Any]) -> tuple[str, str | None]:
-    label4_target = dialog_button_target(response, "4")
-    if label4_target:
-        return "click_text", label4_target
-    if labeled_windows(response, "4"):
+    if is_pdf_report_prompt(response):
+        target = pdf_report_yes_target(response)
+        if target:
+            return "click_text", target
         return "wait", None
-    if labeled_windows(response, "5"):
-        return "click_text", dialog_button_target(response, "5") or "确定"
-    if labeled_windows(response, "2"):
+    if is_report_generated(response):
+        return "click_text", confirm_button_target(response) or "确定"
+    legacy_dialog_target = dialog_button_target(response, "4", "5")
+    if legacy_dialog_target:
+        return "click_text", legacy_dialog_target
+    if labeled_windows(response, "4", "5"):
+        return "wait", None
+    if is_new_patient_window(response):
         return "form_input", None
-    if labeled_windows(response, "0"):
+    if is_login_window(response):
         return "click_text", LOGIN_TEXT
 
     if ocr_contains(response, UNSELECTED_PATIENT_TEXT):
@@ -374,13 +404,18 @@ def decide_action(response: dict[str, Any]) -> tuple[str, str | None]:
 
 
 def decide_after_analysis(response: dict[str, Any]) -> tuple[str, str | None]:
-    label4_target = dialog_button_target(response, "4")
-    if label4_target:
-        return "click_text", label4_target
-    if labeled_windows(response, "4"):
+    if is_pdf_report_prompt(response):
+        target = pdf_report_yes_target(response)
+        if target:
+            return "click_text", target
         return "wait", None
-    if labeled_windows(response, "5"):
-        return "click_text", dialog_button_target(response, "5") or "确定"
+    if is_report_generated(response):
+        return "click_text", confirm_button_target(response) or "确定"
+    legacy_dialog_target = dialog_button_target(response, "4", "5")
+    if legacy_dialog_target:
+        return "click_text", legacy_dialog_target
+    if labeled_windows(response, "4", "5"):
+        return "wait", None
     if ocr_contains(response, CHECK_DONE_TEXT):
         return "finish", None
     return "wait", None
@@ -520,7 +555,7 @@ class VisionFlow:
         while True:
             self.check_runtime(started_at)
             response = await self.detect_window(f"finish_{self.capture_index + 1}.jpg")
-            if has_label(response, "1") and find_ocr_center(response, NEW_PATIENT_TEXT) is not None:
+            if find_ocr_center(response, NEW_PATIENT_TEXT) is not None:
                 LOGGER.info("vision linear action=click_text target=%s", NEW_PATIENT_TEXT)
                 await self.click_ocr_text_required(response, NEW_PATIENT_TEXT)
                 await self.sleep(self.config.wait_after_action)

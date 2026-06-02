@@ -120,7 +120,15 @@ class VisionFlowTest(unittest.TestCase):
         flow = FakeVisionFlow(
             [
                 {"ocr": []},
-                {"label": "0", "ocr": [{"text": "登录", "center": [110, 257]}]},
+                {
+                    "label": "0",
+                    "ocr": [
+                        {"text": "用户登录", "center": [42, 13]},
+                        {"text": "用户名：", "center": [65, 150]},
+                        {"text": "密码：", "center": [58, 193]},
+                        {"text": "登录", "center": [110, 257]},
+                    ],
+                },
                 {"label": "1", "ocr": [{"text": "未选择患者"}, {"text": "就绪"}, {"text": "新建患者", "center": [176, 227]}]},
                 {"label": "2", "ocr": []},
                 {"label": "1", "ocr": [{"text": "患者号"}, {"text": "就绪"}, {"text": "开始检查", "center": [300, 300]}]},
@@ -164,7 +172,15 @@ class VisionFlowTest(unittest.TestCase):
         vision = load_module()
         response = {
             "windows": [
-                {"label": "0", "ocr": [{"text": "登录", "center": [110, 259]}]},
+                {
+                    "label": "0",
+                    "ocr": [
+                        {"text": "用户登录", "center": [42, 13]},
+                        {"text": "用户名：", "center": [65, 150]},
+                        {"text": "密码：", "center": [58, 193]},
+                        {"text": "登录", "center": [110, 259]},
+                    ],
+                },
                 {
                     "label": "1",
                     "ocr": [
@@ -286,6 +302,111 @@ class VisionFlowTest(unittest.TestCase):
 
         self.assertTrue(vision.is_report_generated(response))
 
+    def test_generic_window_label_uses_ocr_for_login(self):
+        vision = load_module()
+        response = {
+            "windows": [
+                {
+                    "label": "1",
+                    "ocr": [
+                        {"text": "用户登录", "center": [42, 13]},
+                        {"text": "用户名：", "center": [65, 150]},
+                        {"text": "密码：", "center": [58, 193]},
+                        {"text": "登录", "center": [110, 259]},
+                    ],
+                }
+            ]
+        }
+
+        self.assertTrue(vision.is_login_window(response))
+        self.assertEqual(vision.decide_action(response), ("click_text", "登录"))
+
+    def test_generic_window_label_uses_ocr_for_new_patient_dialog(self):
+        vision = load_module()
+        response = {
+            "windows": [
+                {
+                    "label": "0",
+                    "ocr": [
+                        {"text": "新建患者", "center": [48, 13]},
+                        {"text": "患者号:", "center": [45, 58]},
+                        {"text": "姓名：", "center": [39, 121]},
+                        {"text": "性别:", "center": [39, 186]},
+                        {"text": "年龄：", "center": [39, 250]},
+                        {"text": "确认", "center": [99, 443]},
+                    ],
+                }
+            ]
+        }
+
+        self.assertTrue(vision.is_new_patient_window(response))
+        self.assertEqual(vision.decide_action(response), ("form_input", None))
+
+    def test_order_department_window_starts_form_before_main_window_actions(self):
+        vision = load_module()
+        response = {
+            "windows": [
+                {
+                    "label": "0",
+                    "ocr": [
+                        {"text": "当前患者", "center": [159, 523]},
+                        {"text": "未选择患者", "center": [456, 557]},
+                        {"text": "检查进度", "center": [159, 599]},
+                        {"text": "就绪", "center": [456, 664]},
+                        {"text": "新建患者", "center": [176, 227]},
+                    ],
+                },
+                {
+                    "label": "0",
+                    "ocr": [
+                        {"text": "患者号:", "center": [45, 58]},
+                        {"text": "开单科室：", "center": [50, 313]},
+                        {"text": "确认", "center": [99, 443]},
+                    ],
+                },
+            ]
+        }
+
+        self.assertTrue(vision.is_new_patient_window(response))
+        self.assertEqual(vision.decide_action(response), ("form_input", None))
+
+    def test_generic_window_label_uses_ocr_for_pdf_prompt(self):
+        vision = load_module()
+        response = {
+            "windows": [
+                {
+                    "label": "1",
+                    "ocr": [
+                        {"text": "选择报告类型", "center": [902, 474]},
+                        {"text": "是否生成 PDF 报告?", "center": [960, 524]},
+                        {"text": "是(Y)", "center": [922, 602]},
+                        {"text": "否(N)", "center": [1016, 602]},
+                    ],
+                }
+            ]
+        }
+
+        self.assertTrue(vision.is_pdf_report_prompt(response))
+        self.assertEqual(vision.decide_after_analysis(response), ("click_text", "是(Y)"))
+
+    def test_generic_window_label_uses_ocr_for_report_generated(self):
+        vision = load_module()
+        response = {
+            "windows": [
+                {
+                    "label": "1",
+                    "ocr": [
+                        {"text": "分析完成", "center": [834, 467]},
+                        {"text": "检查报告已生成！", "center": [893, 516]},
+                        {"text": "确定", "center": [1073, 610]},
+                    ],
+                }
+            ]
+        }
+
+        self.assertTrue(vision.is_report_generated(response))
+        self.assertEqual(vision.decide_after_analysis(response), ("click_text", "确定"))
+
     def test_start_check_waits_until_hid_form_input_has_completed(self):
         task = {"eventClassList": [{"clickType": 0, "x": 100, "y": 443}], "patient": {"patient_id": "P1"}}
         flow = FakeVisionFlow(
@@ -344,6 +465,36 @@ class VisionFlowTest(unittest.TestCase):
         self.assertEqual(flow.open_count, 0)
         self.assertEqual(flow.clicked_texts, ["开始检查", "数据分析", "是", "确定", "新建患者"])
 
+    def test_linear_flow_starts_directly_from_generic_label_zero_order_department_form(self):
+        task = {"eventClassList": [{"clickType": 0, "x": 100, "y": 443}], "patient": {"patient_id": "P1"}}
+        flow = FakeVisionFlow(
+            [
+                {
+                    "label": "0",
+                    "ocr": [
+                        {"text": "患者号:", "center": [45, 58]},
+                        {"text": "开单科室：", "center": [50, 313]},
+                        {"text": "确认", "center": [99, 443]},
+                    ],
+                },
+                {"label": "0", "ocr": [{"text": "患者号"}, {"text": "就绪"}, {"text": "开始检查", "center": [300, 300]}]},
+                {"label": "0", "ocr": [{"text": "检查完成！"}, {"text": "数据分析", "center": [400, 400]}]},
+                {
+                    "label": "0",
+                    "ocr": [{"text": "是否生成PDF报告？"}, {"text": "是", "center": [220, 320]}],
+                },
+                {"label": "0", "ocr": [{"text": "检查报告已生成！"}, {"text": "确定", "center": [260, 260]}]},
+                {"label": "0", "ocr": [{"text": "新建患者", "center": [176, 227]}]},
+            ]
+        )
+
+        result = asyncio.run(flow.run_until_form_done(task))
+
+        self.assertEqual(result, "analysis_finished")
+        self.assertEqual(flow.hid_output.forms, [task])
+        self.assertEqual(flow.open_count, 0)
+        self.assertEqual(flow.clicked_texts, ["开始检查", "数据分析", "是", "确定", "新建患者"])
+
     def test_icon_not_found_waits_longer_and_retries(self):
         task = {"eventClassList": [], "patient": {"patient_id": "P1"}}
         flow = FakeVisionFlow(
@@ -372,7 +523,15 @@ class VisionFlowTest(unittest.TestCase):
         flow = FakeVisionFlow(
             [
                 {"ocr": []},
-                {"label": "0", "ocr": [{"text": "登录", "center": [110, 257]}]},
+                {
+                    "label": "0",
+                    "ocr": [
+                        {"text": "用户登录", "center": [42, 13]},
+                        {"text": "用户名：", "center": [65, 150]},
+                        {"text": "密码：", "center": [58, 193]},
+                        {"text": "登录", "center": [110, 257]},
+                    ],
+                },
                 {"ocr": []},
                 {"label": "1", "ocr": [{"text": "未选择患者"}, {"text": "就绪"}, {"text": "新建患者", "center": [176, 227]}]},
                 {"label": "2", "ocr": []},
