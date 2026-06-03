@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,6 +54,8 @@ class FakeVisionFlow:
                 analysis_wait=0.0,
                 max_runtime=5.0,
                 timeout_seconds=1.0,
+                close_msc_popup_after_report=False,
+                close_msc_popup_when_detected=True,
             ),
             FakeHidOutput(),
         )
@@ -115,6 +118,151 @@ class VisionFlowTest(unittest.TestCase):
         self.assertIn("multifilesink", cmd)
         self.assertIn("location=/tmp/vision/.window_1_%02d.jpg", cmd)
 
+    def test_select_capture_frame_prefers_largest_frame_over_last_frame(self):
+        vision = load_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "shot.jpg"
+            (Path(temp_dir) / ".shot_00.jpg").write_bytes(b"\xff\xd8" + b"0" * 41654 + b"\xff\xd9")
+            (Path(temp_dir) / ".shot_28.jpg").write_bytes(b"\xff\xd8" + b"1" * 187784 + b"\xff\xd9")
+            (Path(temp_dir) / ".shot_29.jpg").write_bytes(b"\xff\xd8" + b"2" * 41105 + b"\xff\xd9")
+
+            selected = vision.select_capture_frame(output, frames=30)
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.name, ".shot_28.jpg")
+
+    def test_select_capture_frame_ignores_large_non_jpeg_frame(self):
+        vision = load_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "shot.jpg"
+            (Path(temp_dir) / ".shot_28.jpg").write_bytes(b"\xff\xd8" + b"1" * 187784 + b"\xff\xd9")
+            (Path(temp_dir) / ".shot_29.jpg").write_bytes(b"x" * 190363)
+
+            selected = vision.select_capture_frame(output, frames=30)
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.name, ".shot_28.jpg")
+
+    def test_capture_jpeg_retries_when_batch_is_only_tiny_black_frames(self):
+        vision = load_module()
+        calls = []
+        original_run = vision.subprocess.run
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "shot.jpg"
+
+            def fake_run(cmd, check, timeout):
+                calls.append((cmd, check, timeout))
+                size = 41109 if len(calls) == 1 else 187788
+                (Path(temp_dir) / ".shot_29.jpg").write_bytes(b"\xff\xd8" + b"x" * (size - 4) + b"\xff\xd9")
+
+            try:
+                vision.subprocess.run = fake_run
+                vision.capture_jpeg(
+                    "/dev/video9",
+                    output,
+                    timeout=1.0,
+                    frames=30,
+                    retry_delay=0.0,
+                )
+            finally:
+                vision.subprocess.run = original_run
+
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(output.stat().st_size, 187788)
+
+    def test_msc_explorer_close_center_uses_preview_keyword(self):
+        vision = load_module()
+        response = {
+            "image_size": {"width": 1920, "height": 1080},
+            "ocr": [
+                {"text": "RK3568MSC (E:)", "center": [924, 363], "box": [872, 351, 976, 375]},
+                {"text": "驱动器工具", "center": [818, 391], "box": [784, 382, 852, 400]},
+                {"text": "选择要预览的文件", "center": [1438, 668], "box": [1392, 659, 1484, 677]},
+            ],
+        }
+
+        self.assertEqual(vision.msc_explorer_close_center(response), (1556, 363))
+
+    def test_wait_after_report_closes_msc_explorer_before_finish(self):
+        vision = load_module()
+        flow = FakeVisionFlow(
+            [
+                {
+                    "image_size": {"width": 1920, "height": 1080},
+                    "ocr": [
+                        {"text": "RK3568MSC (E:)", "center": [924, 363], "box": [872, 351, 976, 375]},
+                        {"text": "驱动器工具", "center": [818, 391], "box": [784, 382, 852, 400]},
+                        {"text": "选择要预览的文件", "center": [1438, 668], "box": [1392, 659, 1484, 677]},
+                    ],
+                },
+                {"ocr": [{"text": "新建患者", "center": [173, 226]}]},
+            ]
+        )
+
+        asyncio.run(flow._impl.wait_and_close_msc_explorer_after_report(vision.time.monotonic()))
+
+        self.assertEqual(flow.hid_output.clicks, [(1556, 363)])
+
+    def test_detect_window_closes_msc_explorer_when_seen(self):
+        vision = load_module()
+        original_capture_jpeg = vision.capture_jpeg
+        original_post_image = vision.post_image
+        responses = [
+            {
+                "image_size": {"width": 1920, "height": 1080},
+                "ocr": [
+                    {"text": "RK3568MSC (E:)", "center": [924, 363], "box": [872, 351, 976, 375]},
+                    {"text": "驱动器工具", "center": [818, 391], "box": [784, 382, 852, 400]},
+                    {"text": "选择要预览的文件", "center": [1438, 668], "box": [1392, 659, 1484, 677]},
+                ],
+            },
+            {"ocr": [{"text": "新建患者", "center": [173, 226]}]},
+        ]
+        capture_calls = []
+
+        def fake_capture_jpeg(*args, **kwargs):
+            capture_calls.append((args, kwargs))
+
+        def fake_post_image(*args, **kwargs):
+            if not responses:
+                raise AssertionError("unexpected post_image call")
+            return responses.pop(0)
+
+        try:
+            vision.capture_jpeg = fake_capture_jpeg
+            vision.post_image = fake_post_image
+            flow = vision.VisionFlow(
+                SimpleNamespace(
+                    enabled=True,
+                    device="/dev/video9",
+                    workdir="/tmp/test-vision",
+                    icon_endpoint="http://127.0.0.1/icon",
+                    window_endpoint="http://127.0.0.1/window",
+                    software="人体成分分析仪",
+                    wait_after_open=0.0,
+                    wait_after_action=0.0,
+                    wait_after_no_detection=5.0,
+                    wait_after_start=0.0,
+                    analysis_wait=0.0,
+                    max_runtime=5.0,
+                    timeout_seconds=1.0,
+                    close_msc_popup_when_detected=True,
+                ),
+                FakeHidOutput(),
+            )
+
+            response = asyncio.run(flow.detect_window("probe.jpg"))
+        finally:
+            vision.capture_jpeg = original_capture_jpeg
+            vision.post_image = original_post_image
+
+        self.assertEqual(response["ocr"][0]["text"], "新建患者")
+        self.assertEqual(flow.hid_output.clicks, [(1556, 363)])
+        self.assertEqual(len(capture_calls), 2)
+
     def test_label_two_executes_form_and_continues_until_analysis_finish(self):
         task = {"eventClassList": [{"clickType": 0, "x": 100, "y": 443}], "patient": {"patient_id": "P1"}}
         flow = FakeVisionFlow(
@@ -167,6 +315,62 @@ class VisionFlowTest(unittest.TestCase):
 
         self.assertEqual(vision.decide_action(response), ("click_text", "开始检查"))
         self.assertEqual(vision.find_ocr_center(response, "开始检查"), (300, 300))
+
+    def test_prepare_can_restart_from_existing_ready_patient(self):
+        task = {"eventClassList": [{"clickType": 0, "x": 100, "y": 443}], "patient": {"patient_id": "P1"}}
+        flow = FakeVisionFlow(
+            [
+                {
+                    "label": "1",
+                    "ocr": [
+                        {"text": "当前患者"},
+                        {"text": "患号：P265607：年龄1科"},
+                        {"text": "就绪"},
+                        {"text": "开始检查", "center": [300, 300]},
+                        {"text": "新建患者", "center": [176, 227]},
+                    ],
+                },
+                {"label": "2", "ocr": []},
+                {"label": "1", "ocr": [{"text": "就绪"}, {"text": "开始检查", "center": [300, 300]}]},
+                {"label": "3", "ocr": [{"text": "检查完成"}, {"text": "数据分析", "center": [400, 400]}]},
+                {"label": "4", "ocr": [{"text": "是否生成PDF报告？"}, {"text": "是", "center": [220, 320]}]},
+                {"label": "5", "ocr": [{"text": "检查报告已生成！"}, {"text": "确定", "center": [260, 260]}]},
+                {"label": "1", "ocr": [{"text": "新建患者", "center": [176, 227]}]},
+            ]
+        )
+
+        result = asyncio.run(flow.run_until_form_done(task))
+
+        self.assertEqual(result, "analysis_finished")
+        self.assertEqual(flow.hid_output.forms, [task])
+        self.assertEqual(flow.clicked_texts, ["新建患者", "开始检查", "数据分析", "是", "确定", "新建患者"])
+
+    def test_prepare_can_restart_from_completed_patient(self):
+        task = {"eventClassList": [{"clickType": 0, "x": 100, "y": 443}], "patient": {"patient_id": "P1"}}
+        flow = FakeVisionFlow(
+            [
+                {
+                    "label": "1",
+                    "ocr": [
+                        {"text": "检查完成！"},
+                        {"text": "开始检查", "center": [300, 300]},
+                        {"text": "新建患者", "center": [176, 227]},
+                    ],
+                },
+                {"label": "2", "ocr": []},
+                {"label": "1", "ocr": [{"text": "就绪"}, {"text": "开始检查", "center": [300, 300]}]},
+                {"label": "3", "ocr": [{"text": "检查完成"}, {"text": "数据分析", "center": [400, 400]}]},
+                {"label": "4", "ocr": [{"text": "是否生成PDF报告？"}, {"text": "是", "center": [220, 320]}]},
+                {"label": "5", "ocr": [{"text": "检查报告已生成！"}, {"text": "确定", "center": [260, 260]}]},
+                {"label": "1", "ocr": [{"text": "新建患者", "center": [176, 227]}]},
+            ]
+        )
+
+        result = asyncio.run(flow.run_until_form_done(task))
+
+        self.assertEqual(result, "analysis_finished")
+        self.assertEqual(flow.hid_output.forms, [task])
+        self.assertEqual(flow.clicked_texts, ["新建患者", "开始检查", "数据分析", "是", "确定", "新建患者"])
 
     def test_label_zero_wins_over_label_one_when_both_are_detected(self):
         vision = load_module()
@@ -435,6 +639,19 @@ class VisionFlowTest(unittest.TestCase):
         response = {"label": "3", "ocr": [{"text": "就绪"}, {"text": "开始检查", "center": [300, 300]}]}
 
         self.assertEqual(vision.decide_action(response), ("click_text", "开始检查"))
+
+    def test_start_check_ready_does_not_require_exact_patient_id_ocr(self):
+        vision = load_module()
+        response = {
+            "label": "1",
+            "ocr": [
+                {"text": "患号：P265607：年龄1科"},
+                {"text": "就绪"},
+                {"text": "开始检查", "center": [300, 300]},
+            ],
+        }
+
+        self.assertTrue(vision.is_ready_to_start_check(response))
 
     def test_check_complete_uses_ocr_even_when_label_is_one(self):
         vision = load_module()

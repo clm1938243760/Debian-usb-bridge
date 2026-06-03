@@ -17,6 +17,9 @@ from .compat import to_thread, unlink_missing_ok
 LOGGER = logging.getLogger(__name__)
 DEFAULT_ICON_ENDPOINT = "http://192.168.20.163:5002/icon/locate"
 DEFAULT_WINDOW_ENDPOINT = "http://192.168.20.163:5002/window/detect"
+MIN_CAPTURE_FRAME_BYTES = 64 * 1024
+MAX_CAPTURE_ATTEMPTS = 4
+CAPTURE_RETRY_DELAY_SECONDS = 0.2
 YES_BUTTON_TEXTS = ("是(Y)", "是（Y）")
 CONFIRM_BUTTON_TEXTS = ("确认", "确定")
 PDF_REPORT_PROMPT_TEXT = "是否生成PDF报告"
@@ -38,6 +41,13 @@ PATIENT_AGE_TEXT = "年龄"
 ORDER_DEPARTMENT_TEXT = "开单科室"
 REPORT_GENERATED_TEXT = "检查报告已生成"
 LINEAR_POLL_SECONDS = 0.5
+MSC_EXPLORER_DRIVE_TEXT = "RK3568MSC"
+MSC_EXPLORER_CONTEXT_TEXTS = ("驱动器工具", "搜索RK3568MSC", "此电脑", "选择要预览的文件")
+MSC_EXPLORER_PREVIEW_TEXT = "选择要预览的文件"
+MSC_EXPLORER_WAIT_SECONDS = 20.0
+MSC_EXPLORER_CLOSE_RETRY_SECONDS = 1.0
+MSC_EXPLORER_AFTER_CLOSE_SECONDS = 0.8
+MSC_EXPLORER_MAX_CLOSES = 2
 
 
 def capture_frame_pattern(output: Path) -> Path:
@@ -108,6 +118,46 @@ def build_capture_command(
     return cmd
 
 
+def select_capture_frame(output: Path, frames: int) -> Path | None:
+    frames_found = sorted(output.parent.glob(f".{output.stem}_*{output.suffix}"))
+    if not frames_found:
+        return None
+    sizes = []
+    for frame in frames_found:
+        try:
+            size = frame.stat().st_size
+        except FileNotFoundError:
+            continue
+        if size > 0 and is_jpeg_file(frame):
+            sizes.append((size, frame.name, frame))
+    if not sizes:
+        return None
+    return max(sizes)[2]
+
+
+def is_jpeg_file(path: Path) -> bool:
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(2)
+            if head != b"\xff\xd8":
+                return False
+            if handle.seekable():
+                handle.seek(-2, 2)
+                return handle.read(2) == b"\xff\xd9"
+            return True
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def capture_frame_size(frame: Path | None) -> int:
+    if frame is None:
+        return 0
+    try:
+        return frame.stat().st_size
+    except FileNotFoundError:
+        return 0
+
+
 def capture_jpeg(
     device: str,
     output: Path,
@@ -119,11 +169,11 @@ def capture_jpeg(
     frames: int = 30,
     io_mode: int = 2,
     capture_format: str = "mjpg",
+    min_frame_bytes: int = MIN_CAPTURE_FRAME_BYTES,
+    max_attempts: int = MAX_CAPTURE_ATTEMPTS,
+    retry_delay: float = CAPTURE_RETRY_DELAY_SECONDS,
 ) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    for frame in output.parent.glob(f".{output.stem}_*{output.suffix}"):
-        unlink_missing_ok(frame)
-    unlink_missing_ok(output)
     cmd = build_capture_command(
         device,
         output,
@@ -134,13 +184,18 @@ def capture_jpeg(
         io_mode=io_mode,
         capture_format=capture_format,
     )
-    subprocess.run(cmd, check=True, timeout=timeout)
-    selected = output.with_name(f".{output.stem}_{max(frames - 1, 0):02d}{output.suffix}")
-    if not selected.exists():
-        frames_found = sorted(output.parent.glob(f".{output.stem}_*{output.suffix}"))
-        if frames_found:
-            selected = frames_found[-1]
-    if selected.exists():
+    selected = None
+    for attempt in range(max(1, max_attempts)):
+        for frame in output.parent.glob(f".{output.stem}_*{output.suffix}"):
+            unlink_missing_ok(frame)
+        unlink_missing_ok(output)
+        subprocess.run(cmd, check=True, timeout=timeout)
+        selected = select_capture_frame(output, frames)
+        if capture_frame_size(selected) >= min_frame_bytes:
+            break
+        if attempt + 1 < max(1, max_attempts):
+            time.sleep(retry_delay)
+    if selected is not None:
         selected.replace(output)
     for frame in output.parent.glob(f".{output.stem}_*{output.suffix}"):
         unlink_missing_ok(frame)
@@ -200,6 +255,16 @@ def extract_center(response: dict[str, Any], key: str) -> tuple[int, int] | None
     return int(round(x)), int(round(y))
 
 
+def extract_box(response: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    box = response.get("box")
+    if not isinstance(box, list) or len(box) != 4:
+        return None
+    if not all(isinstance(value, (int, float)) for value in box):
+        return None
+    x1, y1, x2, y2 = box
+    return int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))
+
+
 def response_windows(response: dict[str, Any]) -> list[dict[str, Any]]:
     windows = response.get("windows")
     if isinstance(windows, list):
@@ -245,6 +310,51 @@ def compact_ocr_text(text: str) -> str:
 def ocr_contains(response: dict[str, Any], text: str) -> bool:
     compact_text = compact_ocr_text(text)
     return any(text in item or compact_text in compact_ocr_text(item) for item in ocr_texts(response))
+
+
+def msc_explorer_close_center(response: dict[str, Any]) -> tuple[int, int] | None:
+    has_drive = any(MSC_EXPLORER_DRIVE_TEXT in compact_ocr_text(text) for text in ocr_texts(response))
+    has_context = any(ocr_contains(response, text) for text in MSC_EXPLORER_CONTEXT_TEXTS)
+    if not has_drive or not has_context:
+        return None
+
+    image_size = response.get("image_size") if isinstance(response.get("image_size"), dict) else {}
+    image_width = int(image_size.get("width") or 1920)
+    image_height = int(image_size.get("height") or 1080)
+    title_center = None
+    title_y = None
+    preview_box = None
+    max_keyword_right = None
+
+    for item in ocr_items(response):
+        text = str(item.get("text", "")).strip()
+        compact = compact_ocr_text(text)
+        center = extract_center(item, "center")
+        box = extract_box(item)
+        is_drive_text = MSC_EXPLORER_DRIVE_TEXT in compact
+        is_context_text = any(compact_ocr_text(keyword) in compact for keyword in MSC_EXPLORER_CONTEXT_TEXTS)
+        if is_drive_text and center is not None and center[1] < image_height * 0.45:
+            if title_y is None or center[1] < title_y:
+                title_center = center
+                title_y = center[1]
+        if MSC_EXPLORER_PREVIEW_TEXT in text and box is not None:
+            preview_box = box
+        if (is_drive_text or is_context_text) and box is not None:
+            max_keyword_right = box[2] if max_keyword_right is None else max(max_keyword_right, box[2])
+
+    if title_center is None:
+        return None
+
+    if preview_box is not None:
+        close_x = preview_box[2] + 72
+    elif max_keyword_right is not None:
+        close_x = max(max_keyword_right + 72, title_center[0] + int(image_width * 0.33))
+    else:
+        close_x = title_center[0] + int(image_width * 0.33)
+    close_y = title_center[1]
+    close_x = max(8, min(image_width - 8, close_x))
+    close_y = max(8, min(image_height - 8, close_y))
+    return int(close_x), int(close_y)
 
 
 def is_loading(response: dict[str, Any]) -> bool:
@@ -305,16 +415,19 @@ def is_new_patient_window(response: dict[str, Any]) -> bool:
 
 def is_ready_to_create_patient(response: dict[str, Any]) -> bool:
     return (
-        ocr_contains(response, UNSELECTED_PATIENT_TEXT)
-        and ocr_contains(response, READY_TEXT)
-        and find_ocr_center(response, NEW_PATIENT_TEXT) is not None
+        find_ocr_center(response, NEW_PATIENT_TEXT) is not None
+        and (
+            ocr_contains(response, UNSELECTED_PATIENT_TEXT)
+            or ocr_contains(response, READY_TEXT)
+            or ocr_contains(response, CHECK_DONE_TEXT)
+            or find_ocr_center(response, START_CHECK_TEXT) is not None
+        )
     )
 
 
 def is_ready_to_start_check(response: dict[str, Any]) -> bool:
     return (
-        ocr_contains(response, PATIENT_ID_TEXT)
-        and ocr_contains(response, READY_TEXT)
+        ocr_contains(response, READY_TEXT)
         and find_ocr_center(response, START_CHECK_TEXT) is not None
     )
 
@@ -551,6 +664,31 @@ class VisionFlow:
             LOGGER.info("vision linear action=wait target=None stage=report_generated")
             await self.sleep(LINEAR_POLL_SECONDS)
 
+    async def wait_and_close_msc_explorer_after_report(self, started_at: float) -> None:
+        deadline = time.monotonic() + MSC_EXPLORER_WAIT_SECONDS
+        close_count = 0
+        saw_popup = False
+        while time.monotonic() < deadline:
+            self.check_runtime(started_at)
+            response = await self.detect_window(f"msc_popup_{self.capture_index + 1}.jpg")
+            close_center = msc_explorer_close_center(response)
+            if close_center is None:
+                if saw_popup:
+                    LOGGER.info("vision msc explorer popup closed")
+                    return
+                LOGGER.info("vision linear action=wait target=None stage=msc_explorer_popup")
+                await self.sleep(MSC_EXPLORER_CLOSE_RETRY_SECONDS)
+                continue
+            close_count += 1
+            saw_popup = True
+            LOGGER.info("vision linear action=close_msc_explorer target=%s", close_center)
+            await self.hid_output.click(close_center[0], close_center[1])
+            await self.sleep(MSC_EXPLORER_AFTER_CLOSE_SECONDS)
+            if close_count >= MSC_EXPLORER_MAX_CLOSES:
+                LOGGER.info("vision msc explorer close max attempts reached")
+                return
+        LOGGER.info("vision msc explorer popup wait timeout")
+
     async def wait_and_click_new_patient_to_finish(self, started_at: float) -> None:
         while True:
             self.check_runtime(started_at)
@@ -564,6 +702,23 @@ class VisionFlow:
             await self.sleep(LINEAR_POLL_SECONDS)
 
     async def detect_window(self, image_name: str) -> dict[str, Any]:
+        close_count = 0
+        while True:
+            response = await self.capture_and_detect_window(image_name)
+            if not bool(getattr(self.config, "close_msc_popup_when_detected", True)):
+                return response
+            close_center = msc_explorer_close_center(response)
+            if close_center is None:
+                return response
+            if close_count >= MSC_EXPLORER_MAX_CLOSES:
+                LOGGER.info("vision msc explorer close max attempts reached; continue with current response")
+                return response
+            close_count += 1
+            LOGGER.info("vision linear action=close_msc_explorer target=%s", close_center)
+            await self.hid_output.click(close_center[0], close_center[1])
+            await self.sleep(MSC_EXPLORER_AFTER_CLOSE_SECONDS)
+
+    async def capture_and_detect_window(self, image_name: str) -> dict[str, Any]:
         self.capture_index += 1
         image_path = self.workdir / image_name
         LOGGER.info("vision capture window image: %s", image_path)
