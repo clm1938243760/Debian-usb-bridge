@@ -1,0 +1,158 @@
+device:
+  id: "rk3568-atk-evb1-001"
+  location: "workbench"
+  type: "人体成分检查"
+  profile_dir: "/var/lib/rk3568-gateway/device"
+
+active_profile: body_composition
+profile_files:
+  - "profiles/body_composition.yaml"
+  - "profiles/bodypass.yaml"
+
+scanner:
+  enabled: true
+  event_device: "/dev/input/by-id/usb-USBKey_Chip_USBKey_Module_202730041341-event-kbd"
+  terminator_keys: ["KEY_ENTER", "KEY_KPENTER"]
+  min_length: 8
+
+patient_api:
+  enabled: true
+  endpoint: "http://192.168.112.139:9061/api/client/getTJPatientInfo"
+  timeout_seconds: 10
+  user_agent: "RK3568-Gateway"
+  raw_dir: "/var/lib/rk3568-gateway/api_raw"
+
+hid_input:
+  enabled: true
+  keyboard_backend: "usb_gadget"
+  mouse_backend: "usb_gadget"
+  keyboard_device: "/dev/hidg0"
+  mouse_device: "/dev/hidg1"
+  template_path: "/opt/rk3568_gateway/MarkInfo_SearchTitle_Config_100.json"
+  screen_width: 1920
+  screen_height: 1080
+  action_delay_ms: 150
+  start_delay_ms: 150
+  force_caps_ascii: true
+  non_ascii_mode: "powershell"
+  powershell_wait_ms: 1800
+
+vision:
+  enabled: true
+  device: "/dev/video9"
+  capture_format: "mjpg"
+  capture_width: 1920
+  capture_height: 1080
+  capture_framerate: 30
+  capture_frames: 30
+  capture_io_mode: 2
+  workdir: "/tmp/rk3568-vision-flow"
+  icon_endpoint: "http://192.168.20.163:5002/icon/locate"
+  window_endpoint: "http://192.168.20.163:5002/window/detect"
+  software: "人体成分分析仪"
+  wait_after_open: 2.5
+  wait_after_action: 1.0
+  wait_after_no_detection: 5.0
+  wait_after_start: 3.0
+  analysis_wait: 1.5
+  max_runtime: 300.0
+  timeout_seconds: 15.0
+
+printer:
+  enabled: true
+  command: "lp"
+  printer_name: "HP_DeskJet_4900"
+  timeout_seconds: 60
+
+print_capture:
+  enabled: true
+  device: "/dev/g_printer0"
+  output_dir: "/var/lib/rk3568-gateway/print_jobs"
+  chunk_size: 65536
+  idle_complete_seconds: 2
+  min_job_bytes: 128
+
+report_pdf:
+  enabled: true
+  output_dir: "/var/lib/rk3568-gateway/reports_pdf"
+  keep_original: true
+
+report_upload:
+  enabled: true
+  endpoint: "http://192.168.112.139:9061/api/client/uploadOriginalReport"
+  report_info_path: "/var/lib/rk3568-gateway/device/ReportInfo.xml"
+  state_dir: "/var/lib/rk3568-gateway/report_upload_state"
+  poll_interval_seconds: 5
+  timeout_seconds: 30
+  retry_interval_seconds: 60
+  max_attempts: 3
+  init_baseline: true
+
+msc:
+  enabled: true
+  image_path: "/var/lib/rk3568-gateway/msc/ums_shared.img"
+  mount_dir: "/mnt/rk3568-gateway-msc"
+  output_dir: "/var/lib/rk3568-gateway/msc_files"
+  state_dir: "/var/lib/rk3568-gateway/msc_state"
+  gadget_dir: "/sys/kernel/config/usb_gadget/rockchip"
+  udc_device: "fcc00000.dwc3"
+  poll_interval_seconds: 5
+  stable_seconds: 3
+  quiet_seconds: 2
+  init_baseline: true
+  rebuild_command: "/opt/rk3568_gateway/scripts/setup_usb_composite_gadget.sh"
+  copy_recursive: true
+  ignore_names: ["System Volume Information", "$RECYCLE.BIN"]
+
+gpio:
+  enabled: true
+  consumer: "rk3568-gateway"
+  lines:
+    - name: "down"
+      enabled: true
+      backend: "sysfs"
+      chip: "/dev/gpiochip4"
+      line: 10
+      number: 138
+      direction: "in"
+      active_low: true
+      default: 0
+    - name: "ok"
+      enabled: true
+      backend: "sysfs"
+      chip: "/dev/gpiochip4"
+      line: 11
+      number: 139
+      direction: "in"
+      active_low: true
+      default: 0
+
+vm_transfer:
+  enabled: false
+  method: "scp"
+  host: ""
+  user: ""
+  password: ""
+  remote_dir: "~/Documents"
+  port: 22
+  connect_timeout_seconds: 10
+  keep_local_copy: true
+
+uploader:
+  enabled: false
+  endpoint: ""
+  api_key: ""
+  timeout_seconds: 10
+  retry_interval_seconds: 5
+  max_batch_size: 20
+
+local_api:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+
+storage:
+  sqlite_path: "/var/lib/rk3568-gateway/events.db"
+
+logging:
+  level: "INFO"

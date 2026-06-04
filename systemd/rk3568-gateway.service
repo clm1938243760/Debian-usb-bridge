@@ -1,0 +1,17 @@
+[Unit]
+Description=RK3568 Gateway
+After=network-online.target cups.service rk3568-usb-gadget.service
+Wants=network-online.target rk3568-usb-gadget.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/rk3568_gateway
+Environment=PYTHONPATH=/opt/rk3568_gateway/src
+ExecStart=/opt/rk3568_gateway/.venv/bin/python -m rk3588_gateway.main --config /opt/rk3568_gateway/config.yaml
+Restart=always
+RestartSec=3
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

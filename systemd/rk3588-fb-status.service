@@ -1,0 +1,15 @@
+[Unit]
+Description=RK3588 Framebuffer Status Display
+After=network-online.target rk3588-usb-printer-gadget.service rk3588-gateway.service
+Wants=network-online.target rk3588-usb-printer-gadget.service rk3588-gateway.service
+
+[Service]
+Type=simple
+ExecStart=/opt/rk3588_gateway/.venv/bin/python /opt/rk3588_gateway/scripts/fb_status.py --output ili9488 --spidev /dev/spidev0.0 --dc-gpio 139 --reset-gpio 142 --width 480 --height 320 --rotate 270 --spi-speed 16000000 --color-order rgb --pixel-format 18 --invert off --interval 0.2
+Restart=always
+RestartSec=3
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
