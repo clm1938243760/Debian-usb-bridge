@@ -17,12 +17,12 @@ from PIL import Image, ImageDraw, ImageFont
 FBIOGET_VSCREENINFO = 0x4600
 CANVAS_W = 480
 CANVAS_H = 320
-DESIGN_W = 357
-DESIGN_H = 140
+DESIGN_W = CANVAS_W
+DESIGN_H = CANVAS_H
 CARD_W = CANVAS_W
-CARD_H = round(CARD_W * DESIGN_H / DESIGN_W)
-CARD_X = (CANVAS_W - CARD_W) // 2
-CARD_Y = (CANVAS_H - CARD_H) // 2
+CARD_H = CANVAS_H
+CARD_X = 0
+CARD_Y = 0
 
 
 def resample_bilinear() -> int:
@@ -92,19 +92,19 @@ def text_length(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont)
 
 
 TEXT = {
-    "wait_scan": "\u5019\u8bca",
+    "wait_scan": "\u7b49\u5f85\u62a5\u5230",
     "select_item": "\u60a3\u8005ID\u626b\u7801",
     "inputting": "\u81ea\u52a8\u5f55\u5165",
-    "upload_done": "\u62a5\u544a\u4e0a\u4f20\u6210\u529f",
+    "upload_done": "\u5f55\u5165\u5b8c\u6210",
     "not_found": "\u626b\u7801\u672a\u627e\u5230\u7533\u8bf7\u5355",
     "connecting": "\u6b63\u5728\u8fde\u63a5",
-    "connected": "\u667a\u80fd\u4f53\u5df2\u7ecf\u8fde\u63a5",
+    "connected": "\u667a\u80fd\u4f53\u5df2\u8fde\u63a5",
     "connection_failed": "\u8fde\u63a5\u5931\u8d25",
     "printer_error": "\u672c\u5730\u9700\u8981\u6253\u5370\u673a",
     "service_connecting": "\u670d\u52a1\u8fde\u63a5\u4e2d",
     "querying_order": "\u6b63\u5728\u67e5\u8be2\u7533\u8bf7\u5355",
     "input_done": "\u5f55\u5165\u5b8c\u6210",
-    "wait_report": "\u6b63\u5728\u68c0\u67e5",
+    "wait_report": "\u6b63\u5728\u68c0\u67e5\u4e2d",
     "order": "\u7533\u8bf7\u5355",
     "no_selectable_item": "\u672a\u67e5\u8be2\u5230\u53ef\u9009\u62e9\u9879\u76ee",
     "unnamed_item": "\u672a\u547d\u540d\u9879\u76ee",
@@ -117,19 +117,19 @@ TEXT = {
     "assets_dir": "\u667a\u80fd\u4f53UI",
     "brand": "\u7279\u68c0\u667a\u80fd\u4f53",
     "scan_prompt": "\u7b49\u5f85\u60a3\u8005\u62a5\u5230",
-    "scan_subtitle": "\u8bf7\u8fdb\u884c\u7533\u8bf7\u5355\u626b\u7801",
-    "checking": "\u6b63\u5728\u68c0\u67e5",
-    "checking_subtitle": "\u8bf7\u7b49\u5f85\u68c0\u6d4b\u7ed3\u679c",
+    "scan_subtitle": "\u8bf7\u626b\u63cf\u60a3\u8005\u7533\u8bf7\u5355",
+    "checking": "\u6b63\u5728\u68c0\u67e5\u4e2d",
+    "checking_subtitle": "\u6b63\u5728\u81ea\u52a8\u5f55\u5165",
     "auto_input": "\u6b63\u5728\u81ea\u52a8\u5f55\u5165",
     "do_not_touch": "\u8bf7\u52ff\u64cd\u4f5c\u9f20\u6807\u952e\u76d8",
-    "upload_done_title": "\u62a5\u544a\u4e0a\u4f20\u5b8c\u6210",
+    "upload_done_title": "\u5f55\u5165\u5b8c\u6210",
     "ready_scan": "\u53ef\u4ee5\u7ee7\u7eed\u626b\u7801",
     "file_received": "\u6587\u4ef6\u5df2\u63a5\u6536",
-    "no_order_title": "\u672a\u627e\u5230\u7533\u8bf7\u5355",
+    "no_order_title": "\u672a\u627e\u5230\u60a3\u8005\u7533\u8bf7\u5355",
     "no_order_subtitle": "\u8bf7\u6838\u5bf9\u6761\u7801\u540e\u91cd\u8bd5",
     "connecting_title": "\u6b63\u5728\u542f\u52a8",
     "connecting_subtitle": "\u6b63\u5728\u68c0\u67e5\u7f51\u7edc\u4e0e\u8bbe\u5907",
-    "connected_title": "\u667a\u80fd\u4f53\u5df2\u7ecf\u8fde\u63a5",
+    "connected_title": "\u667a\u80fd\u4f53\u5df2\u8fde\u63a5",
     "connected_subtitle": "\u6b63\u5728\u8fdb\u5165\u5019\u8bca",
     "failed_title": "\u542f\u52a8\u5f02\u5e38",
     "failed_subtitle": "\u8bf7\u68c0\u67e5\u8fde\u63a5\u72b6\u6001",
@@ -163,6 +163,7 @@ def read_state(url: str) -> dict[str, Any]:
 
 
 def load_font(size: int, bold: bool = False):
+    windows_fonts = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
     candidates = (
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc" if bold else "",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -170,6 +171,8 @@ def load_font(size: int, bold: bool = False):
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        str(windows_fonts / ("msyhbd.ttc" if bold else "msyh.ttc")),
+        str(windows_fonts / ("simhei.ttf" if bold else "simsun.ttc")),
     )
     for path in candidates:
         if path and Path(path).exists():
@@ -355,10 +358,10 @@ class AssetRenderer:
     def __init__(self, assets_dir: Path) -> None:
         self.assets_dir = assets_dir
         self.assets = self._load_assets()
-        self.font_tiny = load_font(13)
-        self.font_small = load_font(16)
-        self.font_mid = load_font(20)
-        self.font_big = load_font(25, bold=True)
+        self.font_tiny = load_font(15)
+        self.font_small = load_font(19)
+        self.font_mid = load_font(27)
+        self.font_big = load_font(36, bold=True)
 
     def _load_assets(self) -> dict[str, Image.Image]:
         loaded: dict[str, Image.Image] = {}
@@ -410,9 +413,7 @@ class AssetRenderer:
         elif screen in ("querying", "api_querying"):
             image = self._status_page(TEXT["querying_title"], TEXT["querying_subtitle"], TEXT["querying_order"], (70, 143, 255))
         elif screen in ("wait_report", "report_waiting"):
-            title = str(display.get("title", "") or TEXT["checking"])
-            message = str(display.get("message", "") or TEXT["checking_subtitle"])
-            image = self._status_page(title, message, TEXT["wait_report"], (70, 143, 255))
+            image = self._status_page(TEXT["checking"], TEXT["auto_input"], TEXT["wait_report"], (70, 143, 255))
         elif screen in ("printer_error", "gadget_error"):
             image = self._asset_or_status("printer_error", TEXT["printer_error"], TEXT["failed_subtitle"], TEXT["connection_failed"], (245, 92, 92))
         else:
@@ -450,8 +451,6 @@ class AssetRenderer:
         tag: str,
         accent: tuple[int, int, int],
     ) -> Image.Image:
-        if key in self.assets:
-            return self._asset_canvas(key)
         return self._status_page(title, subtitle, tag, accent)
 
     def _asset_canvas(self, key: str) -> Image.Image:
@@ -471,7 +470,7 @@ class AssetRenderer:
         return fitted, CARD_X + (CARD_W - w) // 2, CARD_Y + (CARD_H - h) // 2
 
     def _background(self) -> Image.Image:
-        return Image.new("RGBA", (CANVAS_W, CANVAS_H), "#000000")
+        return Image.new("RGBA", (CANVAS_W, CANVAS_H), "#e8f4fd")
 
     def _paste_card(self, card: Image.Image) -> Image.Image:
         image = self._background()
@@ -483,37 +482,42 @@ class AssetRenderer:
         return image.convert("RGB")
 
     def _card_base(self, accent: tuple[int, int, int], show_robot: bool = True) -> tuple[Image.Image, ImageDraw.ImageDraw]:
-        card = Image.new("RGBA", (DESIGN_W, DESIGN_H), (0, 0, 0, 0))
+        card = Image.new("RGBA", (DESIGN_W, DESIGN_H), (232, 244, 253, 255))
         draw = ImageDraw.Draw(card, "RGBA")
-        rounded_rectangle(draw, (0, 0, DESIGN_W - 1, DESIGN_H - 1), radius=24, fill=(26, 36, 47, 255))
-        rounded_rectangle(draw, (9, 9, DESIGN_W - 10, DESIGN_H - 10), radius=18, fill=(220, 237, 249, 255))
-        rounded_rectangle(draw, (16, 17, DESIGN_W - 17, DESIGN_H - 18), radius=13, outline=(189, 214, 237, 150), width=1)
+        draw.rectangle((0, 0, DESIGN_W, DESIGN_H), fill=(232, 244, 253, 255))
+        draw.rectangle((0, 0, DESIGN_W, 58), fill=(218, 237, 250, 255))
+        draw.rectangle((0, 57, DESIGN_W, 59), fill=(190, 216, 237, 180))
+        draw.ellipse((24, 23, 36, 35), fill=(*accent, 255))
+        draw.text((46, 18), TEXT["brand"], font=self.font_small, fill=(43, 62, 79, 255))
         if show_robot:
-            rounded_rectangle(draw, (263, 15, DESIGN_W - 20, DESIGN_H - 16), radius=16, fill=(232, 244, 253, 255), outline=(183, 209, 235, 255), width=1)
-            self._draw_robot(draw, 305, 72, accent)
+            draw.rectangle((342, 59, DESIGN_W, DESIGN_H), fill=(240, 248, 255, 255))
+            draw.rectangle((341, 59, 343, DESIGN_H), fill=(197, 221, 241, 180))
+            self._draw_robot(draw, 410, 172, accent)
         return card, draw
 
     def _draw_robot(self, draw: ImageDraw.ImageDraw, cx: int, cy: int, accent: tuple[int, int, int]) -> None:
         line = (*accent, 255)
         soft = (*accent, 42)
-        draw.ellipse((cx - 34, cy - 34, cx + 34, cy + 34), fill=soft)
-        rounded_rectangle(draw, (cx - 25, cy - 15, cx + 25, cy + 19), radius=9, outline=line, width=4)
-        draw.line((cx - 15, cy - 18, cx - 25, cy - 31), fill=line, width=3)
-        draw.line((cx + 15, cy - 18, cx + 25, cy - 31), fill=line, width=3)
-        draw.ellipse((cx - 29, cy - 35, cx - 22, cy - 28), fill=line)
-        draw.ellipse((cx + 22, cy - 35, cx + 29, cy - 28), fill=line)
-        draw.ellipse((cx - 12, cy - 3, cx - 5, cy + 4), fill=line)
-        draw.ellipse((cx + 5, cy - 3, cx + 12, cy + 4), fill=line)
-        draw.arc((cx - 10, cy + 4, cx + 10, cy + 16), 0, 180, fill=line, width=2)
+        draw.ellipse((cx - 56, cy - 56, cx + 56, cy + 56), fill=soft)
+        rounded_rectangle(draw, (cx - 39, cy - 24, cx + 39, cy + 29), radius=13, outline=line, width=6)
+        draw.line((cx - 24, cy - 29, cx - 39, cy - 48), fill=line, width=5)
+        draw.line((cx + 24, cy - 29, cx + 39, cy - 48), fill=line, width=5)
+        draw.ellipse((cx - 44, cy - 54, cx - 34, cy - 44), fill=line)
+        draw.ellipse((cx + 34, cy - 54, cx + 44, cy - 44), fill=line)
+        draw.ellipse((cx - 19, cy - 6, cx - 8, cy + 5), fill=line)
+        draw.ellipse((cx + 8, cy - 6, cx + 19, cy + 5), fill=line)
+        draw.arc((cx - 16, cy + 8, cx + 16, cy + 25), 0, 180, fill=line, width=3)
+        rounded_rectangle(draw, (cx - 31, cy + 31, cx + 31, cy + 45), radius=7, fill=line)
 
     def _status_page(self, title: str, subtitle: str, tag: str, accent: tuple[int, int, int]) -> Image.Image:
         card, draw = self._card_base(accent)
-        title_font = self.font_big if text_length(draw, title, self.font_big) <= 220 else self.font_mid
-        draw.text((25, 27), self._clip(draw, title, title_font, 218), font=title_font, fill=(22, 34, 46, 255))
-        draw.text((25, 64), self._clip(draw, subtitle, self.font_small, 218), font=self.font_small, fill=(73, 88, 105, 255))
-        badge_w = min(max(int(text_length(draw, tag, self.font_tiny)) + 24, 74), 174)
-        rounded_rectangle(draw, (25, 99, 25 + badge_w, 121), radius=11, fill=(*accent, 235))
-        draw.text((37, 102), self._clip(draw, tag, self.font_tiny, badge_w - 24), font=self.font_tiny, fill=(255, 255, 255, 255))
+        max_text_width = 292
+        title_font = self.font_big if text_length(draw, title, self.font_big) <= max_text_width else self.font_mid
+        draw.text((28, 96), self._clip(draw, title, title_font, max_text_width), font=title_font, fill=(25, 39, 52, 255))
+        draw.text((30, 151), self._clip(draw, subtitle, self.font_small, max_text_width), font=self.font_small, fill=(74, 94, 111, 255))
+        badge_w = min(max(int(text_length(draw, tag, self.font_tiny)) + 32, 96), 250)
+        rounded_rectangle(draw, (29, 224, 29 + badge_w, 260), radius=8, fill=(*accent, 245))
+        draw.text((45, 231), self._clip(draw, tag, self.font_tiny, badge_w - 32), font=self.font_tiny, fill=(255, 255, 255, 255))
         return self._paste_card(card)
 
     def _select(self, display: dict[str, Any]) -> Image.Image:
@@ -522,20 +526,23 @@ class AssetRenderer:
         items = display.get("items") if isinstance(display.get("items"), list) else []
         selected = int(display.get("selected_index", 0) or 0)
         scan = str(display.get("scan", "") or "")
-        heading = f"{TEXT['select_item']}  {scan.upper()}" if scan else TEXT["select_item"]
-        draw.text((24, 18), self._clip(draw, heading, self.font_small, 292), font=self.font_small, fill=(33, 48, 64, 255))
+        heading = "\u9009\u62e9\u68c0\u67e5\u9879\u76ee"
+        draw.text((28, 78), heading, font=self.font_mid, fill=(28, 44, 59, 255))
+        if scan:
+            scan_text = self._clip(draw, scan.upper(), self.font_tiny, 170)
+            draw.text((282, 87), scan_text, font=self.font_tiny, fill=(88, 108, 126, 255))
 
-        y = 42
+        y = 116
         visible_items = []
         if items:
             selected = selected % len(items)
             visible_items = [
                 items[(selected + offset) % len(items)]
-                for offset in range(min(3, len(items)))
+                for offset in range(min(4, len(items)))
             ]
         if not visible_items:
-            rounded_rectangle(draw, (26, 54, 331, 88), radius=10, fill=(245, 250, 255, 255), outline=(213, 226, 238, 255), width=1)
-            draw.text((42, 61), TEXT["no_selectable_item"], font=self.font_small, fill=(86, 104, 122, 255))
+            rounded_rectangle(draw, (28, 124, 452, 174), radius=8, fill=(245, 250, 255, 255), outline=(213, 226, 238, 255), width=1)
+            draw.text((48, 137), TEXT["no_selectable_item"], font=self.font_small, fill=(86, 104, 122, 255))
         for index, item in enumerate(visible_items):
             if not isinstance(item, dict):
                 continue
@@ -543,18 +550,18 @@ class AssetRenderer:
             row_fill = (*accent, 255) if active else (244, 248, 252, 255)
             text_fill = (255, 255, 255, 255) if active else (35, 50, 65, 255)
             outline = (*accent, 255) if active else (218, 228, 238, 255)
-            rounded_rectangle(draw, (26, y, 331, y + 20), radius=8, fill=row_fill, outline=outline, width=1)
+            rounded_rectangle(draw, (28, y, 452, y + 34), radius=8, fill=row_fill, outline=outline, width=1)
             text = str(item.get("exam_item", "") or item.get("title", "") or TEXT["unnamed_item"])
-            prefix = ">" if active else " "
-            draw.text((39, y + 2), self._clip(draw, f"{prefix} {text}", self.font_tiny, 274), font=self.font_tiny, fill=text_fill)
-            y += 24
-        rounded_rectangle(draw, (25, 114, 203, 130), radius=8, fill=(230, 239, 248, 255))
-        draw.text((34, 115), self._clip(draw, TEXT["select_hint"], self.font_tiny, 150), font=self.font_tiny, fill=(83, 99, 116, 255))
-        if len(items) > 3:
-            rounded_rectangle(draw, (336, 43, 342, 108), radius=3, fill=(204, 219, 233, 255))
-            knob_h = max(14, int(65 * min(3, len(items)) / len(items)))
-            knob_y = 43 + int((65 - knob_h) * selected / max(len(items) - 1, 1))
-            rounded_rectangle(draw, (336, knob_y, 342, knob_y + knob_h), radius=3, fill=(*accent, 255))
+            prefix = "\u25b6" if active else " "
+            draw.text((44, y + 5), self._clip(draw, f"{prefix} {text}", self.font_small, 388), font=self.font_small, fill=text_fill)
+            y += 38
+        rounded_rectangle(draw, (28, 282, 292, 311), radius=8, fill=(220, 235, 247, 255))
+        draw.text((42, 287), "\u4e0a/\u4e0b\u9009\u62e9    \u786e\u8ba4\u952e\u786e\u8ba4", font=self.font_tiny, fill=(72, 92, 109, 255))
+        if len(items) > 4:
+            rounded_rectangle(draw, (460, 116, 466, 266), radius=3, fill=(204, 219, 233, 255))
+            knob_h = max(20, int(150 * min(4, len(items)) / len(items)))
+            knob_y = 116 + int((150 - knob_h) * selected / max(len(items) - 1, 1))
+            rounded_rectangle(draw, (460, knob_y, 466, knob_y + knob_h), radius=3, fill=(*accent, 255))
         return self._paste_card(card)
 
     def _inputting(self, display: dict[str, Any]) -> Image.Image:
@@ -562,7 +569,7 @@ class AssetRenderer:
         lines = []
         if exam_item:
             lines.append(f"{TEXT['current_input']}: {exam_item}")
-        return self._detail_status_page(TEXT["checking"], TEXT["auto_input"], TEXT["inputting"], (255, 183, 77), lines)
+        return self._detail_status_page(TEXT["checking"], TEXT["auto_input"], TEXT["inputting"], (255, 168, 48), lines)
 
     def _exam_mismatch(self, display: dict[str, Any]) -> Image.Image:
         device_type = str(display.get("device_type", "") or "")
@@ -589,17 +596,18 @@ class AssetRenderer:
         lines: list[str],
     ) -> Image.Image:
         card, draw = self._card_base(accent)
-        title_font = self.font_mid if text_length(draw, title, self.font_big) > 218 else self.font_big
-        draw.text((25, 22), self._clip(draw, title, title_font, 218), font=title_font, fill=(22, 34, 46, 255))
-        draw.text((25, 55), self._clip(draw, subtitle, self.font_small, 218), font=self.font_small, fill=(73, 88, 105, 255))
-        y = 82
+        max_text_width = 292
+        title_font = self.font_mid if text_length(draw, title, self.font_big) > max_text_width else self.font_big
+        draw.text((28, 89), self._clip(draw, title, title_font, max_text_width), font=title_font, fill=(22, 34, 46, 255))
+        draw.text((30, 143), self._clip(draw, subtitle, self.font_small, max_text_width), font=self.font_small, fill=(73, 88, 105, 255))
+        y = 181
         for line in lines[:2]:
-            clipped = self._clip(draw, str(line), self.font_tiny, 218)
-            draw.text((25, y), clipped, font=self.font_tiny, fill=(35, 50, 65, 255))
-            y += 20
-        badge_w = min(max(int(text_length(draw, tag, self.font_tiny)) + 24, 74), 174)
-        rounded_rectangle(draw, (25, 111, 25 + badge_w, 128), radius=8, fill=(*accent, 235))
-        draw.text((37, 112), self._clip(draw, tag, self.font_tiny, badge_w - 24), font=self.font_tiny, fill=(255, 255, 255, 255))
+            clipped = self._clip(draw, str(line), self.font_tiny, max_text_width)
+            draw.text((30, y), clipped, font=self.font_tiny, fill=(52, 70, 87, 255))
+            y += 24
+        badge_w = min(max(int(text_length(draw, tag, self.font_tiny)) + 32, 96), 250)
+        rounded_rectangle(draw, (29, 252, 29 + badge_w, 288), radius=8, fill=(*accent, 245))
+        draw.text((45, 259), self._clip(draw, tag, self.font_tiny, badge_w - 32), font=self.font_tiny, fill=(255, 255, 255, 255))
         return self._paste_card(card)
 
     def _draw_center_overlay(self, image: Image.Image, title: str, subtitle: str) -> None:
@@ -700,7 +708,7 @@ def run_boot_check(display: Any, renderer: AssetRenderer, url: str, timeout: flo
         }
         bad = [name for name, ok in checks.items() if not ok]
         if not bad:
-            display.write(renderer.render_boot("ok", TEXT["service_started"]))
+            display.write(renderer.render_boot("ok", TEXT["connected_subtitle"]))
             time.sleep(1.6)
             return
         last_detail = TEXT["waiting"] + " " + " / ".join(bad)

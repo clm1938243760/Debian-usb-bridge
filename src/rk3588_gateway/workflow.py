@@ -34,7 +34,7 @@ class GatewayWorkflow:
         self.display_state = {
             "screen": "wait_scan",
             "title": "等待患者报到",
-            "message": "请进行申请单扫码",
+            "message": "请扫描患者申请单",
             "items": [],
             "selected_index": 0,
             "scan": "",
@@ -192,8 +192,8 @@ class GatewayWorkflow:
             self._set_scan_display(
                 generation,
                 "wait_report",
-                "正在检查",
-                "正在准备自动录入",
+                "正在检查中",
+                "正在自动录入",
                 **input_display,
             )
             self._hid_input_active = True
@@ -204,7 +204,7 @@ class GatewayWorkflow:
                 self._set_scan_display(
                     generation,
                     "inputting",
-                    "正在检查",
+                    "正在检查中",
                     "正在自动录入",
                     **input_display,
                 )
@@ -266,8 +266,8 @@ class GatewayWorkflow:
             self._set_scan_display(
                 generation,
                 "upload_done",
-                "input done",
-                "ready for next scan",
+                "录入完成",
+                "可以继续患者报到",
                 scan=scan,
                 items=items,
                 selected_index=index,
@@ -409,7 +409,7 @@ class GatewayWorkflow:
             done_at = float(self.display_state.get("done_at", 0) or 0)
             return_after = float(self.display_state.get("return_after_seconds", 3) or 3)
             if done_at and time.time() - done_at >= return_after:
-                self._set_display("wait_scan", "等待患者报到", "请进行申请单扫码", items=[], selected_index=0, scan="")
+                self._set_display("wait_scan", "等待患者报到", "请扫描患者申请单", items=[], selected_index=0, scan="")
         popup = self.display_state.get("popup")
         if isinstance(popup, dict) and float(popup.get("expires_at", 0) or 0) <= time.time():
             self.display_state["popup"] = None
@@ -436,7 +436,7 @@ class GatewayWorkflow:
         self._set_scan_display(
             generation,
             "not_found",
-            "未找到申请单",
+            "未找到患者申请单",
             "请核对条码后重试",
             scan=scan,
             items=[],

@@ -92,7 +92,7 @@ class FakeVisionFlow:
     async def detect_bodypass_stage_window(self, stage, image_name, predicate):
         return await self.detect_window(image_name)
 
-    async def detect_bodypass_main_window_light(self, image_name):
+    async def detect_bodypass_main_window_light(self, image_name, full_fallback=False):
         self.light_count += 1
         return await self.detect_window(image_name)
 
@@ -224,7 +224,20 @@ class VisionFlowTest(unittest.TestCase):
 
         def fake_post_image(endpoint, image_path, timeout, extra=None):
             post_extras.append(extra)
-            return {"ocr": [{"text": "体成分数据管理程序（BodyPas", "center": [588, 187]}], "elapsed_ms": 250}
+            if extra["roi_box"] == [430, 70, 950, 240]:
+                return {
+                    "ocr": [{"text": "体成分数据管理程序（BodyPas", "center": [588, 187]}],
+                    "image_size": {"width": 1920, "height": 1080},
+                    "elapsed_ms": 250,
+                }
+            return {
+                "ocr": [
+                    {"text": vision.BODYPASS_MEMBER_ID_TEXT, "center": [505, 362]},
+                    {"text": vision.BODYPASS_MEMBER_NAME_TEXT, "center": [505, 390]},
+                ],
+                "image_size": {"width": 1920, "height": 1080},
+                "elapsed_ms": 200,
+            }
 
         flow = vision.VisionFlow(
             SimpleNamespace(
@@ -254,11 +267,82 @@ class VisionFlowTest(unittest.TestCase):
             vision.capture_jpeg = original_capture_jpeg
             vision.post_image = original_post_image
 
-        self.assertEqual(len(post_extras), 1)
-        self.assertEqual(post_extras[0]["roi_box"], [467, 166, 797, 218])
+        self.assertEqual(len(post_extras), 2)
+        self.assertEqual(post_extras[0]["roi_box"], [430, 70, 950, 240])
+        self.assertEqual(post_extras[1]["roi_box"], [450, 270, 720, 420])
         self.assertTrue(vision.is_bodypass_main_window(response))
         self.assertEqual(vision.bodypass_window_box(response), vision.BODYPASS_MAIN_WINDOW_BOX)
         self.assertTrue(response["bodypass_light"])
+
+    def test_bodypass_main_box_tracks_moved_window_from_member_labels(self):
+        vision = load_module()
+        response = {
+            "image_size": {"width": 1920, "height": 1080},
+            "ocr": [
+                {"text": vision.BODYPASS_MEMBER_ID_TEXT, "center": [638, 289]},
+                {"text": vision.BODYPASS_MEMBER_NAME_TEXT, "center": [639, 316]},
+            ],
+        }
+
+        self.assertEqual(
+            vision.bodypass_main_box_from_member_labels(response),
+            (600, 93, 1612, 822),
+        )
+
+    def test_bodypass_initial_light_miss_falls_back_on_the_same_capture(self):
+        vision = load_module()
+        original_capture_jpeg = vision.capture_jpeg
+        original_post_image = vision.post_image
+        capture_calls = []
+        post_extras = []
+
+        def fake_capture_jpeg(*args, **kwargs):
+            capture_calls.append((args, kwargs))
+
+        def fake_post_image(endpoint, image_path, timeout, extra=None):
+            post_extras.append(extra)
+            if extra is not None:
+                return {"ocr": [], "elapsed_ms": 5}
+            return {"ocr": [{"text": "desktop", "center": [1, 1]}], "elapsed_ms": 50}
+
+        flow = vision.VisionFlow(
+            SimpleNamespace(
+                enabled=True,
+                device="/dev/video9",
+                workdir="/tmp/test-vision",
+                icon_endpoint="http://127.0.0.1/icon",
+                window_endpoint="http://127.0.0.1/window",
+                software="BodyPass",
+                capture_width=1920,
+                capture_height=1080,
+                capture_framerate=30,
+                capture_frames=4,
+                capture_io_mode=2,
+                capture_format="mjpg",
+                timeout_seconds=1.0,
+                max_runtime=5.0,
+            ),
+            FakeHidOutput(),
+        )
+
+        try:
+            vision.capture_jpeg = fake_capture_jpeg
+            vision.post_image = fake_post_image
+            response = asyncio.run(
+                flow.detect_bodypass_main_window_light(
+                    "main.jpg",
+                    full_fallback=True,
+                )
+            )
+        finally:
+            vision.capture_jpeg = original_capture_jpeg
+            vision.post_image = original_post_image
+
+        self.assertEqual(len(capture_calls), 1)
+        self.assertEqual(len(post_extras), 2)
+        self.assertIsNotNone(post_extras[0])
+        self.assertIsNone(post_extras[1])
+        self.assertEqual(response["ocr"][0]["text"], "desktop")
 
     def test_bodypass_roi_falls_back_to_full_window_every_third_miss(self):
         vision = load_module()
@@ -921,6 +1005,28 @@ class VisionFlowTest(unittest.TestCase):
         self.assertEqual(vision.bodypass_input_center(window, vision.BODYPASS_MEMBER_ID_TEXT), (685, 362))
         self.assertEqual(vision.bodypass_input_center(window, vision.BODYPASS_MEMBER_NAME_TEXT), (685, 390))
 
+    def test_bodypass_already_open_checks_light_main_window_before_opening_icon(self):
+        vision = load_module()
+        main = vision.bodypass_main_light_response(
+            {
+                "ocr": [
+                    {
+                        "text": vision.BODYPASS_TITLE_TEXTS[0],
+                        "center": [575, 186],
+                    }
+                ]
+            }
+        )
+        flow = FakeVisionFlow([main], flow="bodypass")
+
+        response = asyncio.run(
+            flow._impl.prepare_bodypass_main_window(vision.time.monotonic())
+        )
+
+        self.assertTrue(vision.is_bodypass_main_window(response))
+        self.assertEqual(flow.light_count, 1)
+        self.assertEqual(flow.open_count, 0)
+
     def test_bodypass_flow_opens_inputs_member_and_prints_result(self):
         task = {
             "scan_text": "P2605260007",
@@ -974,7 +1080,7 @@ class VisionFlowTest(unittest.TestCase):
 
         self.assertEqual(result, "bodypass_finished")
         self.assertEqual(flow.open_count, 1)
-        self.assertEqual(flow.light_count, 1)
+        self.assertEqual(flow.light_count, 2)
         self.assertEqual(
             flow.hid_output.inputs,
             [

@@ -2,16 +2,16 @@
 
 ## Current Version
 
-- Version: `v0.915.68`
+- Version: `v0.916.68`
 - Target board: ATK-DLRK3568 / RK3568 Debian
 - Repository: `clm1938243760/Debian-usb-bridge`
 - Runtime path on board: `/opt/rk3568_gateway`
 - Runtime state path: `/var/lib/rk3568-gateway`
-- Python package version: `0.915.68`
+- Python package version: `0.916.68`
 
 ## Version Scope
 
-`v0.915.68` saves the RK3568 BodyPass lightweight main-window detection release. It keeps the `v0.914.68` BodyPass speed improvements and removes another expensive full-window OCR pass after the desktop icon is opened by checking only the fixed title ROI and then using the known main-window box for relative-coordinate automation.
+`v0.916.68` saves the RK3568 full-screen status UI and faster BodyPass already-open detection release. The framebuffer UI now consistently fills the 480x320 display, and BodyPass checks lightweight title/member ROIs before icon opening while deriving the main-window anchor from visible member labels when the window has moved.
 
 ## History
 
@@ -26,6 +26,7 @@
 - `v0.913.68`: 加入双软件 profile 切换和 BodyPass 自动流程，完成 BodyPass 打印后预览窗口、检测结果明细窗口固定坐标关闭。
 - `v0.914.68`: 优化 BodyPass 板端视觉速度和稳定性，加入 ROI OCR 接口、阶段 ROI 轮询、模板优先图标定位、输入框主窗口相对坐标和更短等待参数。
 - `v0.915.68`: Adds lightweight BodyPass main-window title ROI detection after icon open, uses a synthetic fixed main-window box for input and later stage ROIs, and validates the flow with 20 consecutive RK3568 board runs.
+- `v0.916.68`: Adds the unified 480x320 full-screen UI, revised patient workflow states, lightweight already-open BodyPass detection, same-frame full-window fallback, and moved-window anchor recovery.
 
 ## Main Functions
 
@@ -135,6 +136,30 @@ sudo systemctl restart rk3568-gateway.service
 grep '^active_profile:' /opt/rk3568_gateway/config.yaml
 systemctl is-active rk3568-gateway.service
 ```
+
+## v0.916.68 Changes
+
+- RK3568 status UI:
+  - All primary states render at the same 480x320 size without simulated black borders.
+  - Startup shows `智能体已连接`, then transitions to patient check-in.
+  - Workflow states cover waiting for check-in, item selection, patient-not-found, checking, automatic input, and completion.
+  - The item selector supports four visible rows without overlap.
+- BodyPass startup detection:
+  - The software-already-open path checks the lightweight title ROI before attempting desktop icon detection.
+  - The title search ROI was widened to tolerate normal BodyPass window movement.
+  - Member ID/name label OCR derives a dynamic main-window anchor for relative-coordinate HID input.
+  - An initial lightweight miss can fall back to full-window detection using the same captured frame.
+  - Icon opening is skipped when the BodyPass main window is already detected.
+- Automated coverage:
+  - Added framebuffer render tests for state dimensions and non-black screen edges.
+  - Added BodyPass tests for already-open detection, same-capture fallback, and moved-window anchoring.
+
+## v0.916.68 Validation
+
+- Local unit tests: `py -3.14 -m unittest discover -s tests -v`, `59 tests OK`.
+- Local compile check: `py -3.14 -m compileall -q src scripts tests`.
+- Source whitespace check: `git diff --check`.
+- RK3568 deployment target: `linaro@192.168.20.250:/opt/rk3568_gateway`.
 
 ## v0.915.68 Changes
 

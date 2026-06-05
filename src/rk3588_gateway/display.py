@@ -25,7 +25,7 @@ DISPLAY_HTML = """<!doctype html>
       width: 100%;
       height: 100%;
       margin: 0;
-      background: #000;
+      background: #e8f4fd;
       color: var(--ink);
       overflow: hidden;
     }
@@ -37,40 +37,51 @@ DISPLAY_HTML = """<!doctype html>
       position: relative;
       width: 480px;
       height: 320px;
-      background: #000;
+      background: #e8f4fd;
       overflow: hidden;
     }
     .agent-card {
       position: absolute;
-      left: 0;
-      top: 66px;
-      width: 357px;
-      height: 140px;
-      padding: 9px;
-      border-radius: 24px;
-      background: #1a2530;
+      inset: 0;
+      width: 480px;
+      height: 320px;
+      padding: 0;
+      border-radius: 0;
+      background: #e8f4fd;
       overflow: hidden;
-      transform: scale(1.344537815);
-      transform-origin: left top;
     }
     .panel {
       position: relative;
       width: 100%;
       height: 100%;
-      border-radius: 18px;
+      border-radius: 0;
       background: var(--panel);
-      border: 1px solid rgba(185, 211, 235, 0.72);
-      padding: 17px 16px;
+      border: 0;
+      padding: 82px 18px 28px 28px;
       display: grid;
-      grid-template-columns: 1fr 75px;
-      gap: 13px;
+      grid-template-columns: 1fr 120px;
+      gap: 22px;
+    }
+    .panel::before {
+      content: "●  特检智能体";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 58px;
+      padding: 17px 28px;
+      background: #daedfa;
+      border-bottom: 2px solid rgba(185, 211, 235, 0.72);
+      color: var(--accent);
+      font-size: 19px;
+      font-weight: 700;
     }
     .panel.select {
       display: block;
-      padding: 15px 17px;
+      padding: 76px 28px 28px;
     }
     .title {
-      font-size: 24px;
+      font-size: 36px;
       line-height: 1.12;
       font-weight: 700;
       letter-spacing: 0;
@@ -79,12 +90,12 @@ DISPLAY_HTML = """<!doctype html>
       text-overflow: ellipsis;
     }
     .select .title {
-      font-size: 17px;
+      font-size: 27px;
       margin-bottom: 8px;
     }
     .subtitle {
-      margin-top: 10px;
-      font-size: 15px;
+      margin-top: 16px;
+      font-size: 20px;
       line-height: 1.25;
       color: var(--muted);
       white-space: nowrap;
@@ -92,13 +103,13 @@ DISPLAY_HTML = """<!doctype html>
       text-overflow: ellipsis;
     }
     .field {
-      height: 30px;
-      margin-bottom: 8px;
-      border-radius: 10px;
+      height: 44px;
+      margin-bottom: 18px;
+      border-radius: 8px;
       background: #fff;
       border: 1px solid #c2d9ed;
-      padding: 5px 12px;
-      font-size: 15px;
+      padding: 9px 14px;
+      font-size: 19px;
       color: #6b7d8d;
       white-space: nowrap;
       overflow: hidden;
@@ -107,75 +118,76 @@ DISPLAY_HTML = """<!doctype html>
     .tag {
       display: inline-flex;
       align-items: center;
-      max-width: 174px;
-      height: 22px;
-      margin-top: 12px;
-      padding: 0 12px;
-      border-radius: 11px;
+      max-width: 250px;
+      height: 36px;
+      margin-top: 28px;
+      padding: 0 16px;
+      border-radius: 8px;
       background: var(--accent);
       color: #fff;
-      font-size: 12px;
+      font-size: 15px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .robot-tile {
       height: 100%;
-      border-radius: 16px;
+      border-radius: 0;
       background: var(--panel-2);
-      border: 1px solid var(--line);
+      border: 0;
+      border-left: 2px solid var(--line);
       display: grid;
       place-items: center;
     }
     .robot {
       position: relative;
-      width: 52px;
-      height: 48px;
+      width: 78px;
+      height: 72px;
     }
     .robot::before {
       content: "";
       position: absolute;
       left: 0;
-      top: 12px;
-      width: 52px;
-      height: 34px;
-      border: 4px solid var(--accent);
-      border-radius: 12px;
+      top: 18px;
+      width: 78px;
+      height: 51px;
+      border: 6px solid var(--accent);
+      border-radius: 15px;
     }
     .robot::after {
       content: "";
       position: absolute;
-      left: 12px;
-      top: 24px;
-      width: 7px;
-      height: 7px;
+      left: 18px;
+      top: 36px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
       background: var(--accent);
-      box-shadow: 21px 0 0 var(--accent);
+      box-shadow: 32px 0 0 var(--accent);
     }
     .antenna {
       position: absolute;
-      left: 6px;
+      left: 9px;
       top: 0;
-      width: 40px;
-      height: 20px;
-      border-top: 4px solid var(--accent);
-      border-left: 4px solid var(--accent);
-      border-right: 4px solid var(--accent);
+      width: 60px;
+      height: 30px;
+      border-top: 6px solid var(--accent);
+      border-left: 6px solid var(--accent);
+      border-right: 6px solid var(--accent);
       border-radius: 14px 14px 0 0;
     }
     .list {
       display: grid;
-      gap: 5px;
+      gap: 4px;
     }
     .row {
-      height: 22px;
+      height: 34px;
       border-radius: 8px;
       background: #f4f9fd;
       border: 1px solid #d5e4f0;
       color: #233242;
-      padding: 3px 11px;
-      font-size: 13px;
+      padding: 5px 14px;
+      font-size: 18px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -187,31 +199,21 @@ DISPLAY_HTML = """<!doctype html>
     }
     .hint {
       position: absolute;
-      left: 25px;
-      bottom: 12px;
-      max-width: 180px;
-      height: 18px;
-      padding: 1px 10px;
-      border-radius: 9px;
+      left: 28px;
+      bottom: 10px;
+      max-width: 280px;
+      height: 30px;
+      padding: 5px 12px;
+      border-radius: 8px;
       background: #e7f0f8;
       color: #536577;
-      font-size: 12px;
+      font-size: 15px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .meta {
-      position: absolute;
-      left: 70px;
-      right: 70px;
-      bottom: 62px;
-      color: #6d7780;
-      font-size: 11px;
-      line-height: 1;
-      text-align: center;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      display: none;
     }
     .popup {
       position: absolute;
@@ -266,16 +268,16 @@ DISPLAY_HTML = """<!doctype html>
   </div>
   <script>
     const COPY = {
-      wait_scan: ["【候诊】等待患者报到", "请进行申请单扫码", "候诊"],
+      wait_scan: ["等待患者报到", "请扫描患者申请单", "等待报到"],
       select_item: ["患者ID扫码", "选择检查项目", "选择项目"],
-      inputting: ["正在检查", "正在自动录入", "自动录入"],
-      upload_done: ["报告上传成功", "可以继续扫码", "完成"],
-      not_found: ["扫码未找到申请单", "请核对条码后重试", "未找到"],
+      inputting: ["正在检查中", "正在自动录入", "自动录入"],
+      upload_done: ["录入完成", "可以继续患者报到", "已完成"],
+      not_found: ["未找到患者申请单", "请核对条码后重试", "未找到"],
       querying: ["正在查询", "请稍候", "查询申请单"],
-      wait_report: ["正在检查", "请等待检测结果", "检查中"],
+      wait_report: ["正在检查中", "正在自动录入", "检查中"],
       exam_mismatch: ["项目不符", "患者检查项目与设备不符", "未执行"],
       printer_error: ["本地需要打印机", "请检查打印链路", "异常"],
-      connected: ["智能体已经连接", "正在进入候诊", "已连接"],
+      connected: ["智能体已连接", "正在进入患者报到", "已连接"],
     };
     const ACCENTS = {
       ok: "#23c47b",
@@ -309,23 +311,23 @@ DISPLAY_HTML = """<!doctype html>
       const items = Array.isArray(display.items) ? display.items : [];
       const selected = Number(display.selected_index || 0);
       const visible = [];
-      for (let offset = 0; offset < Math.min(3, items.length); offset += 1) {
+      for (let offset = 0; offset < Math.min(4, items.length); offset += 1) {
         visible.push(items[(selected + offset) % items.length]);
       }
       const rows = visible.length
         ? visible.map((item, index) => `<div class="row${index === 0 ? " active" : ""}">${index === 0 ? "&gt; " : ""}${esc(itemTitle(item))}</div>`).join("")
         : `<div class="row">未查询到可选择项目</div>`;
       return `
-        <div class="title">${esc(display.scan ? "患者ID扫码  " + String(display.scan).toUpperCase() : "患者ID扫码")}</div>
+        <div class="title">选择检查项目</div>
         <div class="list">${rows}</div>
-        <div class="hint">UP/DOWN 选择 OK 确认</div>
+        <div class="hint">上/下选择　确认键确认</div>
       `;
     }
     function renderNormal(screen, display) {
       const copy = labelFor(screen);
       const title = display.title && /[\\u4e00-\\u9fff]/.test(display.title) ? display.title : copy[0];
       const message = display.message && /[\\u4e00-\\u9fff]/.test(display.message) ? display.message : copy[1];
-      const field = screen === "wait_scan" ? `<div class="field">请进行申请单扫码</div>` : "";
+      const field = screen === "wait_scan" ? `<div class="field">请扫描患者申请单</div>` : "";
       const mainTitle = `<div class="title">${esc(title)}</div>`;
       const subtitle = screen === "wait_scan" ? "" : `<div class="subtitle">${esc(message)}</div>`;
       return `
