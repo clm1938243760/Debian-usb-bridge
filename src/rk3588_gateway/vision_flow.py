@@ -41,6 +41,7 @@ PATIENT_AGE_TEXT = "年龄"
 ORDER_DEPARTMENT_TEXT = "开单科室"
 REPORT_GENERATED_TEXT = "检查报告已生成"
 LINEAR_POLL_SECONDS = 0.5
+BODYPASS_POLL_SECONDS = 0.2
 MSC_EXPLORER_DRIVE_TEXT = "RK3568MSC"
 MSC_EXPLORER_CONTEXT_TEXTS = ("驱动器工具", "搜索RK3568MSC", "此电脑", "选择要预览的文件")
 MSC_EXPLORER_PREVIEW_TEXT = "选择要预览的文件"
@@ -68,7 +69,21 @@ BODYPASS_PREVIEW_PRINT_OFFSET = (790, 78)
 BODYPASS_PREVIEW_CLOSE_OFFSET = (923, 78)
 BODYPASS_DETAIL_CLOSE_OFFSET = (920, 190)
 BODYPASS_PRINT_DIALOG_PRINT_OFFSET = (393, 721)
-BODYPASS_FIELD_X_OFFSET = 218
+BODYPASS_MEMBER_INPUT_OFFSETS = {
+    BODYPASS_MEMBER_ID_TEXT: (218, 196),
+    BODYPASS_MEMBER_NAME_TEXT: (218, 224),
+}
+BODYPASS_ROI_MARGIN = 4
+BODYPASS_ROI_SCALE = 1.0
+BODYPASS_ROI_FALLBACK_EVERY = 3
+BODYPASS_STAGE_ROIS = {
+    "bodypass_result_state": (0, 380, 340, 470),
+    "bodypass_detail_window": (0, 0, 850, 190),
+    "bodypass_preview_window": (100, 140, 850, 270),
+    "bodypass_print_dialog": (340, 680, 560, 730),
+    "bodypass_preview_close": (100, 140, 850, 270),
+    "bodypass_detail_close": (0, 0, 1010, 230),
+}
 
 
 def capture_frame_pattern(output: Path) -> Path:
@@ -286,6 +301,34 @@ def extract_box(response: dict[str, Any]) -> tuple[int, int, int, int] | None:
     return int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))
 
 
+def clamp_box(box: tuple[int, int, int, int], width: int, height: int) -> tuple[int, int, int, int] | None:
+    x1, y1, x2, y2 = box
+    x1 = max(0, min(int(x1), max(0, width - 1)))
+    y1 = max(0, min(int(y1), max(0, height - 1)))
+    x2 = max(0, min(int(x2), width))
+    y2 = max(0, min(int(y2), height))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return x1, y1, x2, y2
+
+
+def relative_box(
+    base_box: tuple[int, int, int, int],
+    roi: tuple[int, int, int, int],
+    width: int,
+    height: int,
+) -> tuple[int, int, int, int] | None:
+    x1, y1, _, _ = base_box
+    rx1, ry1, rx2, ry2 = roi
+    return clamp_box((x1 + rx1, y1 + ry1, x1 + rx2, y1 + ry2), width, height)
+
+
+def relative_point(base_box: tuple[int, int, int, int], offset: tuple[int, int]) -> tuple[int, int]:
+    x1, y1, _, _ = base_box
+    ox, oy = offset
+    return int(x1 + ox), int(y1 + oy)
+
+
 def response_windows(response: dict[str, Any]) -> list[dict[str, Any]]:
     windows = response.get("windows")
     if isinstance(windows, list):
@@ -378,48 +421,14 @@ def bodypass_window_box(response: dict[str, Any]) -> tuple[int, int, int, int] |
     return first_window_box(response)
 
 
-def bodypass_form_label_item(window: dict[str, Any], label: str) -> dict[str, Any] | None:
+def bodypass_input_center(window: dict[str, Any], label: str) -> tuple[int, int] | None:
+    offset = BODYPASS_MEMBER_INPUT_OFFSETS.get(label)
+    if offset is None:
+        return None
     box = extract_box(window)
     if box is None:
-        box = (0, 0, 1920, 1080)
-    x1, y1, x2, y2 = box
-    width = max(x2 - x1, 1)
-    height = max(y2 - y1, 1)
-    candidates: list[tuple[int, int, dict[str, Any]]] = []
-    for item in ocr_items(window):
-        text = str(item.get("text", "")).strip()
-        if compact_ocr_text(text) != compact_ocr_text(label):
-            continue
-        center = extract_center(item, "center")
-        if center is None:
-            continue
-        cx, cy = center
-        if not (x1 <= cx <= x1 + int(width * 0.38)):
-            continue
-        if not (y1 + int(height * 0.18) <= cy <= y1 + int(height * 0.42)):
-            continue
-        candidates.append((cy, cx, item))
-    if not candidates:
         return None
-    return sorted(candidates)[0][2]
-
-
-def bodypass_input_center(window: dict[str, Any], label: str) -> tuple[int, int] | None:
-    item = bodypass_form_label_item(window, label)
-    if item is None:
-        return None
-    center = extract_center(item, "center")
-    if center is None:
-        return None
-    box = extract_box(window)
-    label_box = extract_box(item)
-    if box is not None:
-        x = box[0] + BODYPASS_FIELD_X_OFFSET
-    elif label_box is not None:
-        x = label_box[2] + 160
-    else:
-        x = center[0] + 180
-    return int(x), int(center[1])
+    return relative_point(box, offset)
 
 
 def bodypass_machine_state_ready(response: dict[str, Any]) -> bool:
@@ -678,6 +687,7 @@ class VisionFlow:
         self.workdir = Path(config.workdir)
         self.capture_index = 0
         self.bodypass_main_box: tuple[int, int, int, int] | None = None
+        self.bodypass_roi_misses: dict[str, int] = {}
 
     async def run_until_form_done(self, task: dict[str, Any], on_hid_start: Callable[[], None] | None = None) -> str:
         if not self.config.enabled:
@@ -722,6 +732,59 @@ class VisionFlow:
             "io_mode": int(getattr(self.config, "capture_io_mode", 2)),
             "capture_format": str(getattr(self.config, "capture_format", "mjpg")),
         }
+
+    def bodypass_stage_roi(self, stage: str) -> tuple[int, int, int, int] | None:
+        if self.bodypass_main_box is None:
+            return None
+        roi = BODYPASS_STAGE_ROIS.get(stage)
+        if roi is None:
+            return None
+        return relative_box(
+            self.bodypass_main_box,
+            roi,
+            int(getattr(self.config, "capture_width", 1920)),
+            int(getattr(self.config, "capture_height", 1080)),
+        )
+
+    async def capture_window_image(self, image_name: str) -> Path:
+        self.capture_index += 1
+        image_path = self.workdir / image_name
+        LOGGER.info("vision capture window image: %s", image_path)
+        await to_thread(capture_jpeg, self.config.device, image_path, self.config.timeout_seconds, **self.capture_options())
+        return image_path
+
+    async def post_window_image(self, image_path: Path, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        response = await to_thread(post_image, self.config.window_endpoint, image_path, self.config.timeout_seconds, extra)
+        LOGGER.info("vision window response: %s", json.dumps(response, ensure_ascii=False))
+        return response
+
+    async def detect_bodypass_stage_window(self, stage: str, image_name: str, predicate: Any) -> dict[str, Any]:
+        roi_box = self.bodypass_stage_roi(stage)
+        if roi_box is None:
+            return await self.detect_window(image_name)
+
+        image_path = await self.capture_window_image(image_name)
+        roi_response = await self.post_window_image(
+            image_path,
+            {
+                "roi_box": list(roi_box),
+                "roi_margin": BODYPASS_ROI_MARGIN,
+                "roi_scale": BODYPASS_ROI_SCALE,
+            },
+        )
+        if predicate(roi_response):
+            self.bodypass_roi_misses[stage] = 0
+            LOGGER.info("vision bodypass stage=%s roi ready box=%s", stage, roi_box)
+            return roi_response
+
+        misses = self.bodypass_roi_misses.get(stage, 0) + 1
+        self.bodypass_roi_misses[stage] = misses
+        if misses % BODYPASS_ROI_FALLBACK_EVERY != 0:
+            LOGGER.info("vision bodypass stage=%s roi wait box=%s miss=%d", stage, roi_box, misses)
+            return roi_response
+
+        LOGGER.info("vision bodypass stage=%s roi fallback full window miss=%d", stage, misses)
+        return await self.post_window_image(image_path)
 
     async def run_bodypass_until_done(self, task: dict[str, Any], on_hid_start: Callable[[], None] | None = None) -> str:
         started_at = time.monotonic()
@@ -857,12 +920,12 @@ class VisionFlow:
     ) -> dict[str, Any]:
         while True:
             self.check_runtime(started_at)
-            response = await self.detect_window(f"{stage}_{self.capture_index + 1}.jpg")
+            response = await self.detect_bodypass_stage_window(stage, f"{stage}_{self.capture_index + 1}.jpg", predicate)
             if predicate(response):
                 LOGGER.info("vision bodypass stage=%s ready", stage)
                 return response
             LOGGER.info("vision bodypass stage=%s wait", stage)
-            await self.sleep(LINEAR_POLL_SECONDS)
+            await self.sleep(BODYPASS_POLL_SECONDS)
 
     async def click_bodypass_toolbar_button(
         self,
@@ -1027,13 +1090,8 @@ class VisionFlow:
             await self.sleep(MSC_EXPLORER_AFTER_CLOSE_SECONDS)
 
     async def capture_and_detect_window(self, image_name: str) -> dict[str, Any]:
-        self.capture_index += 1
-        image_path = self.workdir / image_name
-        LOGGER.info("vision capture window image: %s", image_path)
-        await to_thread(capture_jpeg, self.config.device, image_path, self.config.timeout_seconds, **self.capture_options())
-        response = await to_thread(post_image, self.config.window_endpoint, image_path, self.config.timeout_seconds)
-        LOGGER.info("vision window response: %s", json.dumps(response, ensure_ascii=False))
-        return response
+        image_path = await self.capture_window_image(image_name)
+        return await self.post_window_image(image_path)
 
     async def open_app(self, image_name: str) -> bool:
         image_path = self.workdir / image_name

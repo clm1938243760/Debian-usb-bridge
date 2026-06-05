@@ -2,16 +2,16 @@
 
 ## Current Version
 
-- Version: `v0.913.68`
+- Version: `v0.914.68`
 - Target board: ATK-DLRK3568 / RK3568 Debian
 - Repository: `clm1938243760/Debian-usb-bridge`
 - Runtime path on board: `/opt/rk3568_gateway`
 - Runtime state path: `/var/lib/rk3568-gateway`
-- Python package version: `0.913.68`
+- Python package version: `0.914.68`
 
 ## Version Scope
 
-`v0.913.68`保存的是 RK3568 双软件视觉自动化版本。这个版本保留原来的扫码、API 查询、HID 录入、打印捕获、报告上传业务，并在 RK3568 板端补齐“人体成分分析仪”和 BodyPass 两套软件 profile，可通过 `active_profile` 随时切换。
+`v0.914.68`保存的是 RK3568 BodyPass 视觉流程加速和稳定性版本。这个版本基于 `v0.913.68` 的双软件 profile 切换能力，继续保留扫码、API 查询、HID 录入、打印捕获、报告上传业务，并优化 BodyPass 识别、等待和输入坐标逻辑。
 
 ## History
 
@@ -24,6 +24,7 @@
 - `v0.911.68`: RK3568 加入视觉检测流程和 USB HDMI 采集卡截图流程。
 - `v0.912.68`: RK3568 视觉流程定位版本，加入 PP-OCR/RKNN 常驻服务、窗口检测接口和 U 盘弹窗自动关闭逻辑。
 - `v0.913.68`: 加入双软件 profile 切换和 BodyPass 自动流程，完成 BodyPass 打印后预览窗口、检测结果明细窗口固定坐标关闭。
+- `v0.914.68`: 优化 BodyPass 板端视觉速度和稳定性，加入 ROI OCR 接口、阶段 ROI 轮询、模板优先图标定位、输入框主窗口相对坐标和更短等待参数。
 
 ## Main Functions
 
@@ -40,7 +41,7 @@
    - 使用 USB HDMI 采集卡读取 Windows 画面。
    - 当前稳定采集节点: `/dev/video9`。
    - 当前稳定采集格式: MJPG 1920x1080 30fps。
-   - GStreamer 使用 `io-mode=2`，连续取 30 帧并保存第 29 帧，避免首帧黑屏或未稳定。
+   - GStreamer 使用 `io-mode=2`，当前默认连续取 4 帧并选择可用 JPEG 帧，兼顾画面稳定和启动速度。
    - 视觉接口:
      - `POST /icon/locate`: 识别桌面“人体成分分析仪”图标并返回坐标。
      - `POST /window/detect`: 返回窗口 label、box 和 OCR 坐标。
@@ -133,6 +134,41 @@ sudo systemctl restart rk3568-gateway.service
 grep '^active_profile:' /opt/rk3568_gateway/config.yaml
 systemctl is-active rk3568-gateway.service
 ```
+
+## v0.914.68 Changes
+
+- Capture and wait timing:
+  - `capture_frames` reduced to `4` for faster UVC MJPG capture.
+  - BodyPass `wait_after_open` reduced to `1.2` in the profile.
+  - `wait_after_action`, `wait_after_no_detection`, and `analysis_wait` reduced for faster visual polling.
+- Vision backend:
+  - `/window/detect` accepts optional `roi_box`, `roi_margin`, and `roi_scale`.
+  - ROI requests skip full YOLO window detection and run OCR only on the requested region.
+  - `/icon/locate` uses the configured icon template first when available, avoiding unnecessary full OCR for BodyPass desktop icon detection.
+- BodyPass flow:
+  - Main window detection still establishes the BodyPass window box.
+  - Later result/detail/preview/print stages use main-window-relative ROI OCR with periodic full-window fallback.
+  - Member ID and member name input boxes now use main-window-relative coordinates instead of OCR matching the `编号` and `姓名` labels.
+  - BodyPass stage polling interval reduced to `0.2s`.
+- Measured RK3568 software-not-open path:
+  - From scan workflow start to HID member ID input start: `15.864s`.
+  - The BodyPass profile override now loads `wait_after_open = 1.2` on the board.
+  - The current largest costs are full main-window detection, icon template location, and the post-double-click open wait.
+
+## v0.914.68 Validation
+
+- Local unit tests: `py -3.14 -m unittest discover -s tests -v`, `53 tests OK`.
+- Local compile check: `py -3.14 -m compileall -q src scripts tests`.
+- RK3568 deploy check:
+  - `rk3568-gateway.service`: active.
+  - `rk3568-ppocr.service`: active.
+  - `curl http://127.0.0.1:8080/health`: OK.
+  - `curl http://127.0.0.1:5002/health`: OK.
+- BodyPass scan verification:
+  - Test code: `P2605260007`.
+  - Software-not-open path opened BodyPass, detected main window, started HID member ID input at main-window-relative coordinate `(685, 362)`.
+  - Scan workflow start to HID member ID input start: `15.864s`.
+  - Full BodyPass print flow reached preview close and detail close stages.
 
 ## v0.913.68 Validation
 

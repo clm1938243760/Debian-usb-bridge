@@ -4,6 +4,8 @@ software: "BodyPass"
 flow: bodypass
 vision:
   close_msc_popup_when_detected: true
-  wait_after_open: 4.0
-  wait_after_action: 1.0
+  wait_after_open: 1.2
+  wait_after_action: 0.25
+  wait_after_no_detection: 0.8
+  analysis_wait: 0.5
   max_runtime: 360.0

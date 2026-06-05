@@ -421,6 +421,7 @@ class IconTemplateRunner(object):
         try:
             with os.fdopen(fd, "wb") as handle:
                 handle.write(image_bytes)
+            start = time.time()
             cmd = [
                 self.binary,
                 image_path,
@@ -437,10 +438,15 @@ class IconTemplateRunner(object):
                     stderr=subprocess.STDOUT,
                     timeout=self.timeout,
                 )
+            elapsed_ms = int(round((time.time() - start) * 1000))
             raw = proc.stdout.decode("utf-8", errors="replace")
             if proc.returncode != 0:
                 raise RuntimeError("icon template exit %s: %s" % (proc.returncode, raw[-1000:]))
-            return parse_icon_output(raw, template)
+            parsed = parse_icon_output(raw, template)
+            if parsed is not None:
+                parsed["elapsed_ms"] = elapsed_ms
+                parsed["raw_tail"] = raw[-1000:]
+            return parsed
         finally:
             try:
                 os.unlink(image_path)
@@ -646,6 +652,68 @@ def expanded_crop_box(image_size, box, margin):
     x2 = max(0, min(int(box[2]) + int(margin), width))
     y2 = max(0, min(int(box[3]) + int(margin), height))
     return [x1, y1, x2, y2]
+
+
+def payload_box(payload, key):
+    value = payload.get(key)
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    try:
+        box = [int(round(float(part))) for part in value]
+    except (TypeError, ValueError):
+        return None
+    if box[2] <= box[0] or box[3] <= box[1]:
+        return None
+    return box
+
+
+def payload_number(payload, key, default, cast):
+    value = payload.get(key)
+    if value is None:
+        return default
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def make_roi_ocr_response(image_bytes, source_path, box, ocr_runner, crop_runner, margin, scale):
+    image_size = jpeg_size(image_bytes) or {"width": 0, "height": 0}
+    if scale <= 0:
+        scale = crop_runner.scale if crop_runner.scale > 0 else 1.0
+
+    raw_tail = ""
+    if ocr_runner.worker_ready():
+        crop_box = expanded_crop_box(image_size, box, margin)
+        parsed = ocr_runner.run_file_crop(source_path, box, margin, scale)
+        ocr_items = offset_ocr_items(parsed.get("ocr") or [], crop_box[0], crop_box[1], scale)
+        raw_tail = parsed.get("raw_tail") or ""
+        elapsed_ms = int(parsed.get("elapsed_ms") or 0)
+    else:
+        fd, crop_path = tempfile.mkstemp(prefix="roi_crop_", suffix=".jpg")
+        os.close(fd)
+        try:
+            crop_meta = crop_runner.crop(source_path, crop_path, box)
+            crop_box = crop_meta.get("box") or box
+            scale = crop_meta.get("scale") or 1.0
+            parsed = ocr_runner.run_file(crop_path)
+            ocr_items = offset_ocr_items(parsed.get("ocr") or [], crop_box[0], crop_box[1], scale)
+            raw_tail = parsed.get("raw_tail") or ""
+            elapsed_ms = int(parsed.get("elapsed_ms") or 0)
+        finally:
+            try:
+                os.unlink(crop_path)
+            except OSError:
+                pass
+
+    return {
+        "ok": True,
+        "ocr": ocr_items,
+        "image_size": image_size,
+        "elapsed_ms": elapsed_ms,
+        "roi_box": crop_box,
+        "raw_tail": raw_tail[-2000:],
+    }
 
 
 def make_window_crop_response(image_bytes, source_path, window_result, ocr_runner, crop_runner):
@@ -855,23 +923,32 @@ class OcrHandler(BaseHTTPRequestHandler):
                 try:
                     with os.fdopen(fd, "wb") as handle:
                         handle.write(image_bytes)
-                    window_result = self.server.window_runner.run(image_bytes)
-                    parsed = make_window_crop_response(
-                        image_bytes,
-                        source_path,
-                        window_result,
-                        self.server.ocr_runner,
-                        self.server.crop_runner,
-                    )
+                    roi_box = payload_box(payload, "roi_box")
+                    if roi_box is not None:
+                        parsed = make_roi_ocr_response(
+                            image_bytes,
+                            source_path,
+                            roi_box,
+                            self.server.ocr_runner,
+                            self.server.crop_runner,
+                            payload_number(payload, "roi_margin", 0, int),
+                            payload_number(payload, "roi_scale", 1.0, float),
+                        )
+                    else:
+                        window_result = self.server.window_runner.run(image_bytes)
+                        parsed = make_window_crop_response(
+                            image_bytes,
+                            source_path,
+                            window_result,
+                            self.server.ocr_runner,
+                            self.server.crop_runner,
+                        )
                 finally:
                     try:
                         os.unlink(source_path)
                     except OSError:
                         pass
-            else:
-                parsed = self.server.ocr_runner.run(image_bytes)
-
-            if path in ("/icon/locate", "/locate_icon"):
+            elif path in ("/icon/locate", "/locate_icon"):
                 software = str(payload.get("software") or payload.get("label") or "").strip()
                 if not software:
                     write_json(self, 400, {"ok": False, "error": "missing software"})
@@ -884,17 +961,27 @@ class OcrHandler(BaseHTTPRequestHandler):
                     icon_result = self.server.icon_runner.run(image_bytes, software)
                     if icon_result:
                         center = icon_result.get("center")
+                    parsed = {
+                        "ok": True,
+                        "center": center,
+                        "matched_text": matched_text,
+                        "ocr_count": 0,
+                        "elapsed_ms": icon_result.get("elapsed_ms") if icon_result else None,
+                    }
+                    if icon_result:
+                        parsed.update(icon_result)
                 else:
+                    parsed = self.server.ocr_runner.run(image_bytes)
                     center, matched_text = find_software_center(parsed.get("ocr") or [], software)
-                parsed = {
-                    "ok": True,
-                    "center": center,
-                    "matched_text": matched_text,
-                    "ocr_count": len(parsed.get("ocr") or []),
-                    "elapsed_ms": parsed.get("elapsed_ms"),
-                }
-                if icon_result:
-                    parsed.update(icon_result)
+                    parsed = {
+                        "ok": True,
+                        "center": center,
+                        "matched_text": matched_text,
+                        "ocr_count": len(parsed.get("ocr") or []),
+                        "elapsed_ms": parsed.get("elapsed_ms"),
+                    }
+            else:
+                parsed = self.server.ocr_runner.run(image_bytes)
             write_json(self, 200, parsed)
         except Exception as exc:
             write_json(self, 500, {"ok": False, "error": str(exc)})
