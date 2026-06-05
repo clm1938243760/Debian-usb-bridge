@@ -67,9 +67,11 @@ class FakeVisionFlow:
         self.responses = list(responses)
         self.open_results = list(open_results or [])
         self.open_count = 0
+        self.light_count = 0
         self.clicked_texts = []
         self.sleeps = []
         self._impl.detect_window = self.detect_window
+        self._impl.detect_bodypass_main_window_light = self.detect_bodypass_main_window_light
         self._impl.detect_bodypass_stage_window = self.detect_bodypass_stage_window
         self._impl.open_app = self.open_app
         self._impl.click_ocr_text = self.click_ocr_text
@@ -88,6 +90,10 @@ class FakeVisionFlow:
         return self.responses.pop(0)
 
     async def detect_bodypass_stage_window(self, stage, image_name, predicate):
+        return await self.detect_window(image_name)
+
+    async def detect_bodypass_main_window_light(self, image_name):
+        self.light_count += 1
         return await self.detect_window(image_name)
 
     async def open_app(self, image_name):
@@ -206,6 +212,53 @@ class VisionFlowTest(unittest.TestCase):
         flow.bodypass_main_box = (467, 166, 1479, 895)
 
         self.assertEqual(flow.bodypass_stage_roi("bodypass_result_state"), (467, 546, 807, 636))
+
+    def test_bodypass_main_light_uses_title_roi_and_synthetic_window_box(self):
+        vision = load_module()
+        original_capture_jpeg = vision.capture_jpeg
+        original_post_image = vision.post_image
+        post_extras = []
+
+        def fake_capture_jpeg(*args, **kwargs):
+            return None
+
+        def fake_post_image(endpoint, image_path, timeout, extra=None):
+            post_extras.append(extra)
+            return {"ocr": [{"text": "体成分数据管理程序（BodyPas", "center": [588, 187]}], "elapsed_ms": 250}
+
+        flow = vision.VisionFlow(
+            SimpleNamespace(
+                enabled=True,
+                device="/dev/video9",
+                workdir="/tmp/test-vision",
+                icon_endpoint="http://127.0.0.1/icon",
+                window_endpoint="http://127.0.0.1/window",
+                software="BodyPass",
+                capture_width=1920,
+                capture_height=1080,
+                capture_framerate=30,
+                capture_frames=4,
+                capture_io_mode=2,
+                capture_format="mjpg",
+                timeout_seconds=1.0,
+                max_runtime=5.0,
+            ),
+            FakeHidOutput(),
+        )
+
+        try:
+            vision.capture_jpeg = fake_capture_jpeg
+            vision.post_image = fake_post_image
+            response = asyncio.run(flow.detect_bodypass_main_window_light("main.jpg"))
+        finally:
+            vision.capture_jpeg = original_capture_jpeg
+            vision.post_image = original_post_image
+
+        self.assertEqual(len(post_extras), 1)
+        self.assertEqual(post_extras[0]["roi_box"], [467, 166, 797, 218])
+        self.assertTrue(vision.is_bodypass_main_window(response))
+        self.assertEqual(vision.bodypass_window_box(response), vision.BODYPASS_MAIN_WINDOW_BOX)
+        self.assertTrue(response["bodypass_light"])
 
     def test_bodypass_roi_falls_back_to_full_window_every_third_miss(self):
         vision = load_module()
@@ -921,6 +974,7 @@ class VisionFlowTest(unittest.TestCase):
 
         self.assertEqual(result, "bodypass_finished")
         self.assertEqual(flow.open_count, 1)
+        self.assertEqual(flow.light_count, 1)
         self.assertEqual(
             flow.hid_output.inputs,
             [

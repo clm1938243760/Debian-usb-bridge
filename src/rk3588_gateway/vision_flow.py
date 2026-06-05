@@ -51,6 +51,7 @@ MSC_EXPLORER_AFTER_CLOSE_SECONDS = 0.8
 MSC_EXPLORER_MAX_CLOSES = 2
 BODYPASS_FLOW = "bodypass"
 BODYPASS_TITLE_TEXTS = ("人体成分数据管理程序", "Body Pass程序")
+BODYPASS_MAIN_LIGHT_TEXTS = BODYPASS_TITLE_TEXTS + ("体成分数据管理程序", "BodyPas", "Body Pass")
 BODYPASS_MEMBER_ID_TEXT = "编号"
 BODYPASS_MEMBER_NAME_TEXT = "姓名"
 BODYPASS_RESULT_STATE_TEXT = "显示检测结果"
@@ -69,6 +70,8 @@ BODYPASS_PREVIEW_PRINT_OFFSET = (790, 78)
 BODYPASS_PREVIEW_CLOSE_OFFSET = (923, 78)
 BODYPASS_DETAIL_CLOSE_OFFSET = (920, 190)
 BODYPASS_PRINT_DIALOG_PRINT_OFFSET = (393, 721)
+BODYPASS_MAIN_WINDOW_BOX = (467, 166, 1479, 895)
+BODYPASS_MAIN_TITLE_ROI = (0, 0, 330, 52)
 BODYPASS_MEMBER_INPUT_OFFSETS = {
     BODYPASS_MEMBER_ID_TEXT: (218, 196),
     BODYPASS_MEMBER_NAME_TEXT: (218, 224),
@@ -402,6 +405,9 @@ def first_window_box(response: dict[str, Any]) -> tuple[int, int, int, int] | No
 
 
 def bodypass_main_window(response: dict[str, Any]) -> dict[str, Any] | None:
+    if bool(response.get("bodypass_light")):
+        windows = response_windows(response)
+        return windows[0] if windows else response
     for window in response_windows(response):
         if any(ocr_contains(window, text) for text in BODYPASS_TITLE_TEXTS):
             return window
@@ -419,6 +425,22 @@ def bodypass_window_box(response: dict[str, Any]) -> tuple[int, int, int, int] |
     if window is not None:
         return extract_box(window)
     return first_window_box(response)
+
+
+def bodypass_main_title_roi(width: int, height: int) -> tuple[int, int, int, int] | None:
+    return relative_box(BODYPASS_MAIN_WINDOW_BOX, BODYPASS_MAIN_TITLE_ROI, width, height)
+
+
+def bodypass_main_light_response(response: dict[str, Any]) -> dict[str, Any]:
+    window = {
+        "label": "bodypass_main_light",
+        "box": list(BODYPASS_MAIN_WINDOW_BOX),
+        "ocr": response.get("ocr") if isinstance(response.get("ocr"), list) else [],
+    }
+    merged = dict(response)
+    merged["windows"] = [window]
+    merged["bodypass_light"] = True
+    return merged
 
 
 def bodypass_input_center(window: dict[str, Any], label: str) -> tuple[int, int] | None:
@@ -786,6 +808,37 @@ class VisionFlow:
         LOGGER.info("vision bodypass stage=%s roi fallback full window miss=%d", stage, misses)
         return await self.post_window_image(image_path)
 
+    async def detect_bodypass_main_window_light(self, image_name: str) -> dict[str, Any]:
+        title_box = bodypass_main_title_roi(
+            int(getattr(self.config, "capture_width", 1920)),
+            int(getattr(self.config, "capture_height", 1080)),
+        )
+        if title_box is None:
+            return await self.detect_window(image_name)
+
+        image_path = await self.capture_window_image(image_name)
+        roi_response = await self.post_window_image(
+            image_path,
+            {
+                "roi_box": list(title_box),
+                "roi_margin": BODYPASS_ROI_MARGIN,
+                "roi_scale": BODYPASS_ROI_SCALE,
+            },
+        )
+        if bodypass_contains_any(roi_response, BODYPASS_MAIN_LIGHT_TEXTS):
+            self.bodypass_roi_misses["bodypass_main_window"] = 0
+            LOGGER.info("vision bodypass main window light ready box=%s title_box=%s", BODYPASS_MAIN_WINDOW_BOX, title_box)
+            return bodypass_main_light_response(roi_response)
+
+        misses = self.bodypass_roi_misses.get("bodypass_main_window", 0) + 1
+        self.bodypass_roi_misses["bodypass_main_window"] = misses
+        if misses % BODYPASS_ROI_FALLBACK_EVERY != 0:
+            LOGGER.info("vision bodypass main window light wait title_box=%s miss=%d", title_box, misses)
+            return roi_response
+
+        LOGGER.info("vision bodypass main window light fallback full window miss=%d", misses)
+        return await self.post_window_image(image_path)
+
     async def run_bodypass_until_done(self, task: dict[str, Any], on_hid_start: Callable[[], None] | None = None) -> str:
         started_at = time.monotonic()
         response = await self.prepare_bodypass_main_window(started_at)
@@ -876,7 +929,11 @@ class VisionFlow:
         open_requested = False
         while True:
             self.check_runtime(started_at)
-            response = await self.detect_window(f"bodypass_window_{self.capture_index + 1}.jpg")
+            image_name = f"bodypass_window_{self.capture_index + 1}.jpg"
+            if open_requested:
+                response = await self.detect_bodypass_main_window_light(image_name)
+            else:
+                response = await self.detect_window(image_name)
             if is_bodypass_main_window(response):
                 self.bodypass_main_box = bodypass_window_box(response)
                 LOGGER.info("vision bodypass main window detected")

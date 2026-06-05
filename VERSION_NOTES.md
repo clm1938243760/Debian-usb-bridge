@@ -2,16 +2,16 @@
 
 ## Current Version
 
-- Version: `v0.914.68`
+- Version: `v0.915.68`
 - Target board: ATK-DLRK3568 / RK3568 Debian
 - Repository: `clm1938243760/Debian-usb-bridge`
 - Runtime path on board: `/opt/rk3568_gateway`
 - Runtime state path: `/var/lib/rk3568-gateway`
-- Python package version: `0.914.68`
+- Python package version: `0.915.68`
 
 ## Version Scope
 
-`v0.914.68`保存的是 RK3568 BodyPass 视觉流程加速和稳定性版本。这个版本基于 `v0.913.68` 的双软件 profile 切换能力，继续保留扫码、API 查询、HID 录入、打印捕获、报告上传业务，并优化 BodyPass 识别、等待和输入坐标逻辑。
+`v0.915.68` saves the RK3568 BodyPass lightweight main-window detection release. It keeps the `v0.914.68` BodyPass speed improvements and removes another expensive full-window OCR pass after the desktop icon is opened by checking only the fixed title ROI and then using the known main-window box for relative-coordinate automation.
 
 ## History
 
@@ -25,6 +25,7 @@
 - `v0.912.68`: RK3568 视觉流程定位版本，加入 PP-OCR/RKNN 常驻服务、窗口检测接口和 U 盘弹窗自动关闭逻辑。
 - `v0.913.68`: 加入双软件 profile 切换和 BodyPass 自动流程，完成 BodyPass 打印后预览窗口、检测结果明细窗口固定坐标关闭。
 - `v0.914.68`: 优化 BodyPass 板端视觉速度和稳定性，加入 ROI OCR 接口、阶段 ROI 轮询、模板优先图标定位、输入框主窗口相对坐标和更短等待参数。
+- `v0.915.68`: Adds lightweight BodyPass main-window title ROI detection after icon open, uses a synthetic fixed main-window box for input and later stage ROIs, and validates the flow with 20 consecutive RK3568 board runs.
 
 ## Main Functions
 
@@ -134,6 +135,32 @@ sudo systemctl restart rk3568-gateway.service
 grep '^active_profile:' /opt/rk3568_gateway/config.yaml
 systemctl is-active rk3568-gateway.service
 ```
+
+## v0.915.68 Changes
+
+- BodyPass main-window detection:
+  - After the BodyPass desktop icon is opened, main-window readiness now checks only the fixed title ROI instead of running another full-window OCR pass.
+  - Recognized title fragments include `人体成分数据管理程序`, `体成分数据管理程序`, `BodyPas`, and `Body Pass`.
+  - A successful lightweight title ROI check returns a synthetic main-window response with fixed box `(467, 166, 1479, 895)`.
+  - Member ID/name input and later BodyPass stage ROIs continue to use main-window-relative coordinates.
+  - Every third lightweight miss still falls back to full-window detection, preserving recovery behavior when the window moves or the title ROI is not visible.
+- RK3568 board validation:
+  - 20 consecutive BodyPass scan runs were completed on `linaro@192.168.20.250`.
+  - Closed-start group: 10/10 successful, average scan-to-HID start `11.172s`, average full flow `45.017s`.
+  - Open-start group: 10/10 successful, average scan-to-HID start `9.208s`, average full flow `44.291s`.
+  - No lightweight main-window fallback was needed in the 10 closed-start runs.
+  - One open-start run re-entered the icon-open path because the already-open main window was not detected, but the flow still completed successfully.
+
+## v0.915.68 Validation
+
+- Local unit tests: `py -3.14 -m unittest discover -s tests -v`, `54 tests OK`.
+- Local compile check: `py -3.14 -m compileall -q src scripts tests`.
+- RK3568 services after deploy:
+  - `rk3568-gateway.service`: active.
+  - `rk3568-ppocr.service`: active.
+- Board stress result files:
+  - `/tmp/bodypass_stress.log`
+  - `/tmp/bodypass_stress_result.json`
 
 ## v0.914.68 Changes
 
