@@ -13,6 +13,7 @@ from .config import HidInputConfig
 
 LOGGER = logging.getLogger(__name__)
 KEY_CAPSLOCK = 0x39
+KEY_DELETE = 0x4C
 HID_DEVICE_WAIT_SECONDS = 10.0
 HID_WRITE_TIMEOUT_SECONDS = 3.0
 HID_LED_READ_TIMEOUT_SECONDS = 0.2
@@ -147,6 +148,11 @@ class HidOutput:
         finally:
             await asyncio.shield(self._write_mouse(0, ax, ay))
 
+    async def double_click(self, x: int, y: int) -> None:
+        await self.click(x, y)
+        await asyncio.sleep(HID_MOUSE_SETTLE_SECONDS)
+        await self.click(x, y)
+
     async def ch9350_click_abs(self, x: int, y: int) -> None:
         LOGGER.info("ch9350 mouse click target x=%d y=%d", x, y)
         if self.config.ch9350_mouse_frame == "absolute7":
@@ -205,6 +211,21 @@ class HidOutput:
             await self.type_ascii(text)
         elif self.config.non_ascii_mode == "powershell":
             LOGGER.info("hid input field=%s non-ascii text=%s", field, text)
+            await self.paste_text_windows(text, x, y)
+        else:
+            LOGGER.warning("skip non-ascii hid text len=%d text=%s", len(text), text)
+
+    async def clear_and_input_text(self, text: str, x: int, y: int, field: str = "") -> None:
+        if not text:
+            return
+        LOGGER.info("hid clear and input field=%s text=%s", field, text)
+        await self.double_click(x, y)
+        await asyncio.sleep(0.05)
+        await self._press_key(0, KEY_DELETE)
+        await asyncio.sleep(0.05)
+        if all(ch in KEY for ch in text):
+            await self.type_ascii(text)
+        elif self.config.non_ascii_mode == "powershell":
             await self.paste_text_windows(text, x, y)
         else:
             LOGGER.warning("skip non-ascii hid text len=%d text=%s", len(text), text)

@@ -54,6 +54,7 @@ BODYPASS_TITLE_TEXTS = ("人体成分数据管理程序", "Body Pass程序")
 BODYPASS_MAIN_LIGHT_TEXTS = BODYPASS_TITLE_TEXTS + ("体成分数据管理程序", "BodyPas", "Body Pass")
 BODYPASS_MEMBER_ID_TEXT = "编号"
 BODYPASS_MEMBER_NAME_TEXT = "姓名"
+BODYPASS_MEMBER_BIRTHDAY_TEXT = "出生日期"
 BODYPASS_RESULT_STATE_TEXT = "显示检测结果"
 BODYPASS_TRANSFER_TEXTS = ("传输会员信息", "传输会员")
 BODYPASS_DETAIL_TEXTS = ("测量明细",)
@@ -81,6 +82,7 @@ BODYPASS_MEMBER_LABEL_OFFSETS = {
 BODYPASS_MEMBER_INPUT_OFFSETS = {
     BODYPASS_MEMBER_ID_TEXT: (218, 196),
     BODYPASS_MEMBER_NAME_TEXT: (218, 224),
+    BODYPASS_MEMBER_BIRTHDAY_TEXT: (479, 224),
 }
 BODYPASS_ROI_MARGIN = 4
 BODYPASS_ROI_SCALE = 1.0
@@ -503,6 +505,18 @@ def bodypass_input_center(window: dict[str, Any], label: str) -> tuple[int, int]
     if box is None:
         return None
     return relative_point(box, offset)
+
+
+def bodypass_patient_birthday(patient: dict[str, Any]) -> str:
+    birthday = str(patient.get("birthday") or "").strip()
+    if birthday:
+        return birthday
+    year = str(patient.get("nian") or "").strip()
+    month = str(patient.get("yue") or "").strip()
+    day = str(patient.get("ri") or "").strip()
+    if year and month and day:
+        return f"{year.zfill(4)}-{month.zfill(2)}-{day.zfill(2)}"
+    return ""
 
 
 def bodypass_machine_state_ready(response: dict[str, Any]) -> bool:
@@ -1041,6 +1055,7 @@ class VisionFlow:
         patient = task.get("patient", {}) if isinstance(task.get("patient"), dict) else {}
         patient_id = str(patient.get("patient_id") or task.get("scan_text") or "").strip()
         patient_name = str(patient.get("patient_name") or patient.get("name") or "").strip()
+        birthday = bodypass_patient_birthday(patient)
 
         id_center = bodypass_input_center(window, BODYPASS_MEMBER_ID_TEXT)
         if id_center is None:
@@ -1054,6 +1069,19 @@ class VisionFlow:
             raise RuntimeError("BodyPass member name input field not found")
         LOGGER.info("vision bodypass input patient_name at %s", name_center)
         await self.hid_output.input_text(patient_name, name_center[0], name_center[1], field="bodypass_patient_name")
+        await self.sleep(self.config.wait_after_action)
+
+        if birthday:
+            birthday_center = bodypass_input_center(window, BODYPASS_MEMBER_BIRTHDAY_TEXT)
+            if birthday_center is None:
+                raise RuntimeError("BodyPass birthday input field not found")
+            LOGGER.info("vision bodypass input birthday at %s", birthday_center)
+            await self.hid_output.clear_and_input_text(
+                birthday,
+                birthday_center[0],
+                birthday_center[1],
+                field="bodypass_birthday",
+            )
 
     async def wait_for_bodypass_condition(
         self,

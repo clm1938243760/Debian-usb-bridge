@@ -2,16 +2,16 @@
 
 ## Current Version
 
-- Version: `v0.916.68`
+- Version: `v0.917.68`
 - Target board: ATK-DLRK3568 / RK3568 Debian
 - Repository: `clm1938243760/Debian-usb-bridge`
 - Runtime path on board: `/opt/rk3568_gateway`
 - Runtime state path: `/var/lib/rk3568-gateway`
-- Python package version: `0.916.68`
+- Python package version: `0.917.68`
 
 ## Version Scope
 
-`v0.916.68` saves the RK3568 full-screen status UI and faster BodyPass already-open detection release. The framebuffer UI now consistently fills the 480x320 display, and BodyPass checks lightweight title/member ROIs before icon opening while deriving the main-window anchor from visible member labels when the window has moved.
+`v0.917.68` saves the RK3568 BodyPass birthday input correction release. BodyPass now fills the API birthday into the right-side birth-date field, clears the default value with a double-click plus Delete before typing, and keeps the member ID/name input flow unchanged.
 
 ## History
 
@@ -27,6 +27,7 @@
 - `v0.914.68`: 优化 BodyPass 板端视觉速度和稳定性，加入 ROI OCR 接口、阶段 ROI 轮询、模板优先图标定位、输入框主窗口相对坐标和更短等待参数。
 - `v0.915.68`: Adds lightweight BodyPass main-window title ROI detection after icon open, uses a synthetic fixed main-window box for input and later stage ROIs, and validates the flow with 20 consecutive RK3568 board runs.
 - `v0.916.68`: Adds the unified 480x320 full-screen UI, revised patient workflow states, lightweight already-open BodyPass detection, same-frame full-window fallback, and moved-window anchor recovery.
+- `v0.917.68`: Adds BodyPass birthday input from the patient API and corrects the target coordinate to the right-side birth-date field instead of the phone-number field.
 
 ## Main Functions
 
@@ -136,6 +137,26 @@ sudo systemctl restart rk3568-gateway.service
 grep '^active_profile:' /opt/rk3568_gateway/config.yaml
 systemctl is-active rk3568-gateway.service
 ```
+
+## v0.917.68 Changes
+
+- BodyPass member input:
+  - Adds API birthday input during the BodyPass member-info stage.
+  - Uses `birthday` directly when present, and falls back to `nian`/`yue`/`ri` as `YYYY-MM-DD`.
+  - Clears the default birth-date value by double-clicking the input field, pressing Delete, then typing the API value.
+  - Corrects the birth-date coordinate to the right-side `出生日期` field at main-window-relative offset `(479, 224)`, absolute `(946, 390)` for the verified 1920x1080 BodyPass window.
+  - Keeps member ID and member name input coordinates unchanged.
+- HID input:
+  - Adds a reusable double-click helper.
+  - Adds a reusable clear-and-input helper for fields that already contain a default value.
+
+## v0.917.68 Validation
+
+- Local unit tests: `py -3.14 -m unittest discover -s tests -v`, `60 tests OK`.
+- Local compile check: `py -3.14 -m compileall -q src scripts tests`.
+- Source whitespace check: `git diff --check`.
+- RK3568 deployment target: `linaro@192.168.20.250:/opt/rk3568_gateway`.
+- RK3568 service check: `rk3568-gateway.service` active and `/health` returned `{"ok": true}`.
 
 ## v0.916.68 Changes
 

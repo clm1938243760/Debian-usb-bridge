@@ -26,6 +26,7 @@ class FakeHidOutput:
         self.clicks = []
         self.forms = []
         self.inputs = []
+        self.cleared_inputs = []
 
     async def click(self, x, y):
         self.clicks.append((x, y))
@@ -35,6 +36,9 @@ class FakeHidOutput:
 
     async def input_text(self, text, x, y, field=""):
         self.inputs.append((text, x, y, field))
+
+    async def clear_and_input_text(self, text, x, y, field=""):
+        self.cleared_inputs.append((text, x, y, field))
 
     async def execute_form(self, task):
         self.forms.append(task)
@@ -1004,6 +1008,15 @@ class VisionFlowTest(unittest.TestCase):
 
         self.assertEqual(vision.bodypass_input_center(window, vision.BODYPASS_MEMBER_ID_TEXT), (685, 362))
         self.assertEqual(vision.bodypass_input_center(window, vision.BODYPASS_MEMBER_NAME_TEXT), (685, 390))
+        self.assertEqual(vision.bodypass_input_center(window, vision.BODYPASS_MEMBER_BIRTHDAY_TEXT), (946, 390))
+
+    def test_bodypass_patient_birthday_falls_back_to_date_parts(self):
+        vision = load_module()
+
+        self.assertEqual(
+            vision.bodypass_patient_birthday({"nian": "1991", "yue": "6", "ri": "8"}),
+            "1991-06-08",
+        )
 
     def test_bodypass_already_open_checks_light_main_window_before_opening_icon(self):
         vision = load_module()
@@ -1031,7 +1044,7 @@ class VisionFlowTest(unittest.TestCase):
         task = {
             "scan_text": "P2605260007",
             "eventClassList": [],
-            "patient": {"patient_id": "P2605260007", "patient_name": "张三"},
+            "patient": {"patient_id": "P2605260007", "patient_name": "张三", "birthday": "1991-06-08"},
         }
         main = {
             "windows": [
@@ -1088,6 +1101,7 @@ class VisionFlowTest(unittest.TestCase):
                 ("张三", 685, 390, "bodypass_patient_name"),
             ],
         )
+        self.assertEqual(flow.hid_output.cleared_inputs, [("1991-06-08", 946, 390, "bodypass_birthday")])
         self.assertEqual(
             flow.hid_output.clicks,
             [
