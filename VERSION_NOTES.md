@@ -2,16 +2,16 @@
 
 ## Current Version
 
-- Version: `v0.917.68`
+- Version: `v0.918.68`
 - Target board: ATK-DLRK3568 / RK3568 Debian
 - Repository: `clm1938243760/Debian-usb-bridge`
 - Runtime path on board: `/opt/rk3568_gateway`
 - Runtime state path: `/var/lib/rk3568-gateway`
-- Python package version: `0.917.68`
+- Python package version: `0.918.68`
 
 ## Version Scope
 
-`v0.917.68` saves the RK3568 BodyPass birthday input correction release. BodyPass now fills the API birthday into the right-side birth-date field, clears the default value with a double-click plus Delete before typing, and keeps the member ID/name input flow unchanged.
+`v0.918.68` is the repository normalization and first formal GitHub Release build. It promotes the verified split repository to the default `main` layout and aligns the Git Tag, `VERSION`, Python package version, and changelog. Runtime behavior remains the same as `v0.917.68`.
 
 ## History
 
@@ -28,6 +28,7 @@
 - `v0.915.68`: Adds lightweight BodyPass main-window title ROI detection after icon open, uses a synthetic fixed main-window box for input and later stage ROIs, and validates the flow with 20 consecutive RK3568 board runs.
 - `v0.916.68`: Adds the unified 480x320 full-screen UI, revised patient workflow states, lightweight already-open BodyPass detection, same-frame full-window fallback, and moved-window anchor recovery.
 - `v0.917.68`: Adds BodyPass birthday input from the patient API and corrects the target coordinate to the right-side birth-date field instead of the phone-number field.
+- `v0.918.68`: Promotes the verified split tree to `main`, aligns version metadata, and publishes the first formal GitHub Release without changing runtime behavior.
 
 ## Main Functions
 
